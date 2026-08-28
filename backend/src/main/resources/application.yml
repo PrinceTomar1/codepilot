@@ -44,6 +44,17 @@ spring:
           auth: ${MAIL_SMTP_AUTH:false}
           starttls:
             enable: ${MAIL_SMTP_STARTTLS:false}
+          ssl:
+            enable: ${MAIL_SMTP_SSL:false}
+          # Without these, JavaMail's default is no timeout at all -- if the SMTP host is
+          # unreachable or the port is blocked outbound (seen on some PaaS providers), the
+          # register/resend-verification request thread hangs indefinitely instead of the
+          # graceful failure EmailService is already written to handle (see its sendVerificationEmail
+          # javadoc). 8s is generous for a real SMTP handshake and short enough that a blocked
+          # port fails fast.
+          connectiontimeout: ${MAIL_SMTP_CONNECTION_TIMEOUT_MS:8000}
+          timeout: ${MAIL_SMTP_TIMEOUT_MS:8000}
+          writetimeout: ${MAIL_SMTP_WRITE_TIMEOUT_MS:8000}
 
   jackson:
     default-property-inclusion: non_null
@@ -93,6 +104,18 @@ app:
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
   mail:
     from: ${MAIL_FROM:no-reply@codepilot.local}
+    # "smtp" (default) talks to whatever MAIL_HOST/PORT above point at -- Mailpit locally, a real
+    # SMTP relay in prod. "resend" calls the Resend HTTP API instead: several PaaS providers
+    # (Railway among them) block outbound SMTP entirely on their free tier, and an HTTP call over
+    # 443 sidesteps that. Switch with RESEND_API_KEY set; the from-address falls back to Resend's
+    # no-verification-needed sandbox sender if MAIL_FROM isn't a domain you've verified with them.
+    provider: ${MAIL_PROVIDER:smtp}
+    resend:
+      api-key: ${RESEND_API_KEY:}
+      # Deliberately separate from MAIL_FROM (the SMTP sender) -- Resend 403s any "from" whose
+      # domain isn't verified with them, and a real inbox address doesn't qualify just for being
+      # real. Empty by default so EmailService falls back to Resend's own sandbox sender.
+      from: ${RESEND_FROM_ADDRESS:}
   verification:
     token-expiration-ms: ${VERIFICATION_TOKEN_EXPIRATION_MS:86400000}
   rate-limit:
