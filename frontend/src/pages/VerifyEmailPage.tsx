@@ -68,7 +68,7 @@ export default function VerifyEmailPage() {
         {status === 'error' && (
           <div className="mt-6 space-y-3 text-left">
             <label htmlFor="resend-email" className="label">
-              Get a new verification link
+              Your email (used for both options below)
             </label>
             <input
               id="resend-email"
@@ -79,18 +79,6 @@ export default function VerifyEmailPage() {
               value={resendEmail}
               onChange={(e) => setResendEmail(e.target.value)}
             />
-            <button
-              type="button"
-              onClick={handleResend}
-              disabled={resendState !== 'idle'}
-              className="btn-primary w-full"
-            >
-              {resendState === 'sent'
-                ? 'Check your inbox'
-                : resendState === 'sending'
-                  ? 'Sending…'
-                  : 'Resend verification email'}
-            </button>
 
             <VerifyCodeForm
               email={resendEmail}
@@ -99,6 +87,25 @@ export default function VerifyEmailPage() {
                 setMessage('Email verified. You can sign in now.')
               }}
             />
+
+            <div className="flex items-center gap-3 py-1 text-xs text-slate-600">
+              <div className="h-px flex-1 bg-slate-800" />
+              or
+              <div className="h-px flex-1 bg-slate-800" />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resendState !== 'idle'}
+              className="btn-secondary w-full"
+            >
+              {resendState === 'sent'
+                ? 'Check your inbox'
+                : resendState === 'sending'
+                  ? 'Sending…'
+                  : 'Get a new verification link instead'}
+            </button>
           </div>
         )}
       </div>
