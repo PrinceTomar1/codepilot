@@ -3,6 +3,10 @@
 .env.local
 *.local.env
 
+# --- internal working notes (not for the public repo) ---------------------------
+docs/FINAL_PROJECT_AUDIT.md
+docs/IMPLEMENTATION_AUDIT.md
+
 # --- backend (Java / Maven) -----------------------------------------------------
 backend/target/
 backend/*.log

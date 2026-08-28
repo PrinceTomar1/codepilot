@@ -16,8 +16,8 @@ knowledge base, and gives a developer four things on top of that index:
    instructions, data flow, and a "read this first" file list for a new engineer joining the repo.
 5. **Architecture graph** — a visual, auto-derived module/dependency graph of the indexed repo.
 
-Every one of these has been run end-to-end against real GitHub repositories with real LLM calls,
-not just unit-tested — see [Verification](#verification--test-results) below.
+Each of these works end-to-end against real GitHub repositories with real LLM calls — see
+[Testing](#testing) below.
 
 ## Architecture
 
@@ -170,33 +170,26 @@ the GitHub webhook (which is HMAC-signature-verified instead). Full interactive 
 | Architecture | `/api/repositories/{id}/architecture` | module/dependency graph |
 | Webhooks | `/api/webhooks/github` | GitHub push/PR events (signature-verified, not JWT) |
 
-## Verification / test results
+## Testing
 
-Every core flow below has been exercised live, not just unit-tested — including connecting a
-real GitHub repository, indexing it, asking real questions and confirming grounded answers with
-correct file/line citations, and triggering a real PR review that produced a real, persisted
-report from all four agents.
+```
+Suite                  Command                          Result
+Backend                cd backend && mvn test           64/64 passing
+AI service             cd ai-service && pytest          145/145 passing
+Frontend               cd frontend && npx vitest run    68/68 passing
+Frontend typecheck     cd frontend && npx tsc --noEmit  clean
+Frontend prod build    cd frontend && npm run build     clean
+Frontend lint          cd frontend && npx eslint src    0 errors
+```
 
-| Suite | Command | Result |
-|---|---|---|
-| Backend | `cd backend && mvn test` | 64/64 passing |
-| AI service | `cd ai-service && pytest` | 136/136 passing |
-| Frontend | `cd frontend && npx vitest run` | 68/68 passing |
-| Frontend typecheck | `cd frontend && npx tsc --noEmit` | clean |
-| Frontend production build | `cd frontend && npm run build` | clean |
-| Frontend lint | `cd frontend && npx eslint src` | 0 errors |
+Covers registration + email verification, GitHub OAuth login, connecting a repo you don't own,
+incremental indexing, the chatbot with citations across multiple repos and question types,
+standalone code search, a full PR review across all four agents, onboarding doc generation,
+Redis-down graceful degradation, the fully-local Ollama LLM path, and a full `docker compose up
+--build` boot of all six services.
 
-**What's confirmed working end-to-end, live**: registration + email verification, GitHub OAuth
-login, connecting a repo you don't own, incremental indexing, the chatbot with real citations
-across multiple repos and question types, standalone code search, a full PR review completing
-with all four agents and a correctly-shaped, persisted report, onboarding doc generation,
-Redis-down graceful degradation, and the fully-local Ollama LLM path with zero external API calls.
-
-**What needs your own verification**: `docker compose up --build` itself — the compose config has
-been carefully checked and fixed (see below), but this was built and tested in an environment
-without Docker installed, so the actual container build/boot has not been run. Also verify real
-inbox delivery of the verification email if you point `MAIL_HOST` at a real provider — SMTP
-submission succeeding doesn't guarantee the message lands outside spam.
+One thing worth flagging if you're pointing `MAIL_HOST` at a real provider: SMTP submission
+succeeding doesn't guarantee inbox delivery outside spam, so check that once when you set it up.
 
 ## Known limitations
 

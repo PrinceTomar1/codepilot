@@ -150,9 +150,9 @@ which now respects Railway's injected `$PORT` — see the Dockerfile's `ENTRYPOI
 |---|---|
 | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://<PGHOST>:<PGPORT>/<PGDATABASE>` -- build this from Railway's individual `PGHOST`/`PGPORT`/`PGDATABASE` reference variables. **Not** Railway's combined `DATABASE_URL` value directly -- that's a bare `postgresql://` URI, and Spring's JDBC driver requires the `jdbc:` scheme prefix, so pasting it as-is fails to parse. |
 | `SPRING_DATASOURCE_USERNAME` / `SPRING_DATASOURCE_PASSWORD` | `PGUSER` / `PGPASSWORD` from the Postgres service, as separate values |
-| `SPRING_REDIS_HOST` / `SPRING_REDIS_PORT` / `SPRING_REDIS_PASSWORD` | From the Redis service -- Railway's managed Redis requires auth, so the password variable matters here (added support for it in `application.yml` since it wasn't there before this was needed) |
+| `SPRING_REDIS_HOST` / `SPRING_REDIS_PORT` / `SPRING_REDIS_PASSWORD` | From the Redis service -- Railway's managed Redis requires auth, so the password variable matters here (`application.yml` reads it) |
 | `AI_SERVICE_URL` | `http://ai-service.railway.internal:8000` (the private hostname from step 2) |
-| `JWT_SECRET` | a fresh long random value — **do not reuse the local dev one**, it's been pasted in plaintext chat this session |
+| `JWT_SECRET` | a fresh long random value — **do not reuse the local dev one** |
 | `APP_ENCRYPTION_KEY` | same — fresh value, generated once and never rotated casually (rotating after tokens are already encrypted needs a re-encryption migration) |
 | `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_SMTP_AUTH` / `MAIL_SMTP_STARTTLS` / `MAIL_FROM` | real SMTP credentials (Gmail App Password works, same as local dev) |
 | `CORS_ALLOWED_ORIGIN` / `FRONTEND_URL` | placeholder for now (e.g. `https://placeholder.vercel.app`) — comes back in step 5 |
