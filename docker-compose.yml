@@ -1,0 +1,167 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: codepilot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: codepilot
+      POSTGRES_USER: codepilot
+      POSTGRES_PASSWORD: codepilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codepilot -d codepilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: codepilot-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: codepilot-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # web UI
+
+  # Only actually used when AI_PROVIDER=ollama -- otherwise it just sits idle. Left always-on
+  # (rather than gated behind a Compose profile) so switching providers is a one-line .env
+  # change, not a different `docker compose` invocation. The model itself isn't pulled here (a
+  # multi-GB download doesn't belong in `docker compose up`'s critical path) -- run
+  # `docker compose exec ollama ollama pull qwen2.5:7b-instruct` once after first startup.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: codepilot-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 6
+
+  ai-service:
+    build: ./ai-service
+    container_name: codepilot-ai-service
+    restart: unless-stopped
+    environment:
+      PORT: 8000
+      DATABASE_URL: postgresql://codepilot:codepilot@postgres:5432/codepilot
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      EMBEDDING_DIM: 1536
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-5-20250929}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b-instruct}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 6
+
+  backend:
+    build: ./backend
+    container_name: codepilot-backend
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/codepilot
+      SPRING_DATASOURCE_USERNAME: codepilot
+      SPRING_DATASOURCE_PASSWORD: codepilot
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      AI_SERVICE_URL: http://ai-service:8000
+      JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-secret-change-me}
+      JWT_EXPIRATION_MS: 86400000
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-dev-only-insecure-encryption-key-change-me}
+      # Defaults preserve today's local dev-compose behavior exactly (frontend on
+      # localhost:5173, mail routed to the bundled Mailpit catcher) -- but a real deployment
+      # MUST set these in .env, or the backend will reject the real frontend's CORS origin,
+      # webhook/verification-email links will point at localhost, and mail will silently vanish
+      # into a dev-only container nobody's watching. These three were previously hardcoded here
+      # with no override at all.
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-http://localhost:5173}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-false}
+      MAIL_SMTP_STARTTLS: ${MAIL_SMTP_STARTTLS:-false}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@codepilot.local}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_OAUTH_REDIRECT_URI: ${GITHUB_OAUTH_REDIRECT_URI:-http://localhost:8080/api/auth/github/callback}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+
+  frontend:
+    build:
+      context: ./frontend
+      # A Vite env var is compiled INTO the bundle at build time, not read from the container's
+      # runtime environment -- this used to be a plain `environment:` entry below, which had
+      # silently done nothing since the frontend switched to a real production build (nginx
+      # serving a static `dist/`, no Vite process running to read env vars from at all).
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api}
+    container_name: codepilot-frontend
+    restart: unless-stopped
+    ports:
+      # Host port unchanged so local usage/docs pointing at :5173 keep working; nginx inside
+      # the container listens on 80 (see frontend/Dockerfile), not Vite's dev-server port.
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 6
+
+volumes:
+  postgres_data:
+  ollama_data:

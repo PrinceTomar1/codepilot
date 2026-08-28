@@ -1,0 +1,39 @@
+# --- environment / secrets ----------------------------------------------------
+.env
+.env.local
+*.local.env
+
+# --- backend (Java / Maven) -----------------------------------------------------
+backend/target/
+backend/*.log
+*.class
+*.jar
+!backend/.mvn/wrapper/maven-wrapper.jar
+
+# --- ai-service (Python) --------------------------------------------------------
+ai-service/.venv/
+ai-service/venv/
+ai-service/__pycache__/
+ai-service/**/__pycache__/
+*.pyc
+ai-service/.pytest_cache/
+ai-service/*.egg-info/
+ai-service/uvicorn.log
+
+# --- frontend (Node) -------------------------------------------------------------
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/vite.log
+frontend/*.tsbuildinfo
+
+# --- OS / editor -------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# --- logs / runtime ---------------------------------------------------------
+*.log
+backend/run.log
