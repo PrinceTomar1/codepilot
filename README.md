@@ -1,4 +1,4 @@
-# CodePilot — AI Codebase Intelligence & Developer Assistant
+# CodePilot - AI Codebase intelligence
 
 CodePilot connects to a GitHub repository, indexes it into a RAG (retrieval-augmented generation)
 knowledge base, and gives a developer four things on top of that index:
