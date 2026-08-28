@@ -67,6 +67,22 @@ public class WebClientConfig {
                 .build();
     }
 
+    /** api.sendgrid.com -- see EmailService; only used when app.mail.provider=sendgrid. */
+    @Bean
+    public WebClient sendgridWebClient() {
+        HttpClient httpClient = HttpClient.create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, TIMEOUT_MS)
+                .responseTimeout(java.time.Duration.ofMillis(TIMEOUT_MS))
+                .doOnConnected(conn -> conn
+                        .addHandlerLast(new ReadTimeoutHandler(TIMEOUT_MS, TimeUnit.MILLISECONDS))
+                        .addHandlerLast(new WriteTimeoutHandler(TIMEOUT_MS, TimeUnit.MILLISECONDS)));
+
+        return WebClient.builder()
+                .baseUrl("https://api.sendgrid.com")
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .build();
+    }
+
     @Bean
     public WebClient gitHubWebClient() {
         HttpClient httpClient = HttpClient.create()

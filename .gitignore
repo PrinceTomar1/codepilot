@@ -41,3 +41,4 @@ frontend/*.tsbuildinfo
 # --- logs / runtime ---------------------------------------------------------
 *.log
 backend/run.log
+.vercel

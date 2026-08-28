@@ -36,12 +36,24 @@ public class EmailService {
     @Value("${app.mail.resend.from}")
     private String resendFromAddress;
 
+    @Value("${app.mail.sendgrid.api-key}")
+    private String sendgridApiKey;
+
+    @Value("${app.mail.sendgrid.from}")
+    private String sendgridFromAddress;
+
     @Value("${app.frontend-url}")
     private String frontendUrl;
 
-    public EmailService(JavaMailSender mailSender, @Qualifier("resendWebClient") WebClient resendWebClient) {
+    private final WebClient sendgridWebClient;
+
+    public EmailService(
+            JavaMailSender mailSender,
+            @Qualifier("resendWebClient") WebClient resendWebClient,
+            @Qualifier("sendgridWebClient") WebClient sendgridWebClient) {
         this.mailSender = mailSender;
         this.resendWebClient = resendWebClient;
+        this.sendgridWebClient = sendgridWebClient;
     }
 
     /**
@@ -63,6 +75,9 @@ public class EmailService {
                 """.formatted(code, verificationLink, verificationLink);
         String subject = "Verify your CodePilot email address";
 
+        if ("sendgrid".equalsIgnoreCase(provider)) {
+            return sendViaSendgrid(toEmail, subject, html);
+        }
         if ("resend".equalsIgnoreCase(provider)) {
             return sendViaResend(toEmail, subject, html);
         }
@@ -109,6 +124,34 @@ public class EmailService {
             return true;
         } catch (Exception e) {
             log.error("Failed to send verification email to {} via Resend", toEmail, e);
+            return false;
+        }
+    }
+
+    private boolean sendViaSendgrid(String toEmail, String subject, String html) {
+        // Unlike Resend's sandbox, SendGrid's free tier lets a Single Sender (one email address
+        // you verify by clicking a link they send it -- no domain, no DNS) send to ANY recipient,
+        // 100/day forever. sendgridFromAddress must be exactly that verified address; SendGrid
+        // rejects (403) anything else the same way Resend rejects an unverified domain.
+        if (sendgridFromAddress == null || sendgridFromAddress.isBlank()) {
+            log.error("Cannot send via SendGrid: app.mail.sendgrid.from (SENDGRID_FROM_ADDRESS) is not set");
+            return false;
+        }
+        try {
+            sendgridWebClient.post()
+                    .uri("/v3/mail/send")
+                    .header("Authorization", "Bearer " + sendgridApiKey)
+                    .bodyValue(Map.of(
+                            "personalizations", List.of(Map.of("to", List.of(Map.of("email", toEmail)))),
+                            "from", Map.of("email", sendgridFromAddress),
+                            "subject", subject,
+                            "content", List.of(Map.of("type", "text/html", "value", html))))
+                    .retrieve()
+                    .toBodilessEntity()
+                    .block();
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to send verification email to {} via SendGrid", toEmail, e);
             return false;
         }
     }
