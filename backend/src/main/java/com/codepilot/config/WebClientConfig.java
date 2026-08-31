@@ -97,7 +97,13 @@ public class WebClientConfig {
         return WebClient.builder()
                 .baseUrl("https://api.github.com")
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
-                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                // A large repository's recursive file tree is one single JSON response with one
+                // entry per file -- 16MB was enough for most repos but not, confirmed live, for
+                // something the size of torvalds/linux (~80k files). This still isn't unbounded:
+                // a repository whose tree alone exceeds 64MB of JSON is treated as genuinely too
+                // large (see GitHubClient.fetchRepositoryTree's error handling below), rather than
+                // letting a single request buffer an arbitrary amount of memory.
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(64 * 1024 * 1024))
                 .defaultHeader("Accept", "application/vnd.github+json")
                 .defaultHeader("X-GitHub-Api-Version", "2022-11-28")
                 .build();

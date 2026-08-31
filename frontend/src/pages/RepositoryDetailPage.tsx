@@ -118,7 +118,7 @@ export default function RepositoryDetailPage() {
 
         <div className="min-h-0 flex-1 overflow-hidden">
           {!isReady ? (
-            <NotReadyState status={repo.status} />
+            <NotReadyState status={repo.status} lastIndexError={repo.lastIndexError} />
           ) : (
             <>
               {tab === 'ask' && (
@@ -169,7 +169,38 @@ export default function RepositoryDetailPage() {
   )
 }
 
-function NotReadyState({ status }: { status: string }) {
+/**
+ * The backend persists the real exception message (IndexJob.error), but that's Java-exception
+ * text, not something to show verbatim to a non-technical user. This translates the couple of
+ * causes actually seen in practice into a plain-English explanation with an accurate next step;
+ * anything unrecognized still shows the real message (truncated) rather than a generic guess that
+ * might be flatly wrong for that specific failure -- confirmed live: a repository the size of
+ * torvalds/linux failed with a buffer-size error that had nothing to do with the access token, but
+ * the UI told everyone to "double-check the token" regardless of the actual cause.
+ */
+function explainIndexError(raw: string | null): string {
+  if (!raw) {
+    return "CodePilot couldn't index this repository. Try reconnecting it, or use a smaller repository."
+  }
+  if (/DataBufferLimitException|Exceeded limit on max bytes/i.test(raw)) {
+    return "This repository is too large to index (its file listing alone exceeds what a single GitHub API response can hold) -- very large monorepos aren't supported yet. Try a smaller repository."
+  }
+  if (/401|403|Bad credentials|token/i.test(raw)) {
+    return "CodePilot couldn't index this repository. Double-check the access token has the right scopes and try reconnecting it."
+  }
+  if (/404|Not Found/i.test(raw)) {
+    return "CodePilot couldn't find this repository on GitHub. It may have been renamed, deleted, or made private without updating the connection here."
+  }
+  return raw.length > 200 ? raw.slice(0, 200) + '…' : raw
+}
+
+function NotReadyState({
+  status,
+  lastIndexError,
+}: {
+  status: string
+  lastIndexError?: string | null
+}) {
   const isFailed = status === 'FAILED'
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
@@ -183,8 +214,7 @@ function NotReadyState({ status }: { status: string }) {
               Indexing failed
             </p>
             <p className="mt-1 max-w-sm text-sm text-slate-500">
-              CodePilot couldn&apos;t index this repository. Double-check the
-              access token has the right scopes and try reconnecting it.
+              {explainIndexError(lastIndexError ?? null)}
             </p>
           </div>
         </>

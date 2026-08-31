@@ -11,6 +11,7 @@ public record RepositoryDto(
         String defaultBranch,
         String status,
         Instant indexedAt,
-        Instant createdAt
+        Instant createdAt,
+        String lastIndexError
 ) implements Serializable {
 }

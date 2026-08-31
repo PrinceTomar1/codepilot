@@ -8,6 +8,7 @@ export interface Repository {
   status: RepositoryStatus
   indexedAt: string | null
   createdAt: string
+  lastIndexError: string | null
 }
 
 export interface CreateRepositoryRequest {

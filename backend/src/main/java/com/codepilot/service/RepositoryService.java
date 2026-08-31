@@ -9,6 +9,7 @@ import com.codepilot.entity.CodeRepository;
 import com.codepilot.entity.User;
 import com.codepilot.exception.ApiException;
 import com.codepilot.repository.CodeRepositoryRepository;
+import com.codepilot.repository.IndexJobRepository;
 import com.codepilot.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -34,6 +35,7 @@ public class RepositoryService {
     private final IndexingService indexingService;
     private final EncryptionService encryptionService;
     private final GitHubClient gitHubClient;
+    private final IndexJobRepository indexJobRepository;
 
     @Transactional
     public RepositoryDto createRepository(UUID userId, CreateRepositoryRequest request) {
@@ -163,6 +165,16 @@ public class RepositoryService {
     }
 
     RepositoryDto toDto(CodeRepository repo) {
+        // Only looked up for FAILED repos -- the generic frontend "couldn't index this
+        // repository, check the token" message used to show regardless of actual cause,
+        // including for real reasons that have nothing to do with the token (a repository too
+        // large to fetch in one API response being a real one, confirmed live against
+        // torvalds/linux). No need to pay for this lookup on the common (non-failed) path.
+        String lastIndexError = repo.getStatus() == CodeRepository.RepositoryStatus.FAILED
+                ? indexJobRepository.findFirstByRepositoryIdOrderByStartedAtDesc(repo.getId())
+                        .map(job -> job.getError())
+                        .orElse(null)
+                : null;
         return new RepositoryDto(
                 repo.getId(),
                 repo.getGithubOwner(),
@@ -170,7 +182,8 @@ public class RepositoryService {
                 repo.getDefaultBranch(),
                 repo.getStatus().name(),
                 repo.getIndexedAt(),
-                repo.getCreatedAt()
+                repo.getCreatedAt(),
+                lastIndexError
         );
     }
 }
