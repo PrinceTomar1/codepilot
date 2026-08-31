@@ -39,10 +39,15 @@ public class AiServiceClient {
     private static final Logger log = LoggerFactory.getLogger(AiServiceClient.class);
 
     private final WebClient aiServiceWebClient;
+    private final WebClient aiServiceReviewWebClient;
     private final ObjectMapper objectMapper;
 
-    public AiServiceClient(@Qualifier("aiServiceWebClient") WebClient aiServiceWebClient, ObjectMapper objectMapper) {
+    public AiServiceClient(
+            @Qualifier("aiServiceWebClient") WebClient aiServiceWebClient,
+            @Qualifier("aiServiceReviewWebClient") WebClient aiServiceReviewWebClient,
+            ObjectMapper objectMapper) {
         this.aiServiceWebClient = aiServiceWebClient;
+        this.aiServiceReviewWebClient = aiServiceReviewWebClient;
         this.objectMapper = objectMapper;
     }
 
@@ -55,7 +60,7 @@ public class AiServiceClient {
     }
 
     public AiReviewResponse review(AiReviewRequest request) {
-        return post("/review", request, AiReviewResponse.class);
+        return post(aiServiceReviewWebClient, "/review", request, AiReviewResponse.class);
     }
 
     public AiOnboardingResponse onboarding(AiOnboardingRequest request) {
@@ -71,8 +76,12 @@ public class AiServiceClient {
     }
 
     private <T> T post(String path, Object body, Class<T> responseType) {
+        return post(aiServiceWebClient, path, body, responseType);
+    }
+
+    private <T> T post(WebClient client, String path, Object body, Class<T> responseType) {
         try {
-            return aiServiceWebClient.post()
+            return client.post()
                     .uri(path)
                     .bodyValue(body)
                     .retrieve()

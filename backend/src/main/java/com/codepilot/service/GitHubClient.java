@@ -291,8 +291,13 @@ public class GitHubClient {
 
         List<AiReviewFile> result = new ArrayList<>();
         for (GitHubPullRequestFile f : prFiles) {
+            // ai-service's request schema declares diff/fullContent as plain (non-optional)
+            // strings defaulting to "" when the field is omitted -- but omission only helps if we
+            // never send an explicit null, and GitHub genuinely gives us null patches for binary
+            // files and null content for removed/unfetchable files. A single such file used to
+            // 422 the whole review request; every path below now normalizes to "" instead.
             if (f.filename() == null || "removed".equals(f.status())) {
-                result.add(new AiReviewFile(f.filename(), f.patch(), null));
+                result.add(new AiReviewFile(f.filename(), nullToEmpty(f.patch()), ""));
                 continue;
             }
             String fullContent = null;
@@ -301,9 +306,13 @@ public class GitHubClient {
             } catch (Exception e) {
                 log.warn("Could not fetch full content for {}: {}", f.filename(), e.getMessage());
             }
-            result.add(new AiReviewFile(f.filename(), f.patch(), fullContent));
+            result.add(new AiReviewFile(f.filename(), nullToEmpty(f.patch()), nullToEmpty(fullContent)));
         }
         return result;
+    }
+
+    private static String nullToEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     private String fetchFileContentAtRef(String owner, String repo, String path, String ref, String accessToken) {

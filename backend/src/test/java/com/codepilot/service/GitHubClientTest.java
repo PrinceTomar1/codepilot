@@ -1,6 +1,7 @@
 package com.codepilot.service;
 
 import com.codepilot.dto.ai.AiFileContent;
+import com.codepilot.dto.ai.AiReviewFile;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -123,5 +124,57 @@ class GitHubClientTest {
         List<String> indexedPaths = files.stream().map(AiFileContent::path).toList();
 
         assertThat(indexedPaths).containsExactly("src/main.py");
+    }
+
+    @Test
+    void pullRequestFilesNeverCarryNullPatchOrContent() throws Exception {
+        // Real bug, found live: a removed file and a binary file (GitHub omits "patch" entirely
+        // for binary diffs) both used to produce a null field here, which crashed the entire PR
+        // review with a 422 from ai-service the moment such a file appeared in a real PR --
+        // ai-service's schema requires plain (non-optional) strings, and a null explicitly present
+        // in the JSON fails that validation even though an *omitted* field would have defaulted
+        // to "". Confirmed live against a real GitHub PR after this fix: review completed clean.
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+
+        String filesJson = "["
+                + "{\"filename\":\"deleted.txt\",\"status\":\"removed\",\"sha\":\"s1\"},"
+                + "{\"filename\":\"image.png\",\"status\":\"modified\",\"sha\":\"s2\"},"
+                + "{\"filename\":\"normal.txt\",\"status\":\"modified\",\"patch\":\"@@ -1 +1 @@\\n-old\\n+new\",\"sha\":\"s3\"}"
+                + "]";
+        server.createContext("/repos/octocat/hello-world/pulls/42/files", exchange -> {
+            byte[] bytes = filesJson.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        // image.png: no handler registered at all -- fetchFileContentAtRef must treat the
+        // resulting connection failure as "no content available", not propagate a null through.
+        server.createContext("/repos/octocat/hello-world/contents/normal.txt", exchange -> {
+            String base64 = Base64.getEncoder().encodeToString("new content".getBytes(StandardCharsets.UTF_8));
+            String blobJson = "{\"content\":" + jsonString(base64) + ",\"encoding\":\"base64\"}";
+            byte[] bytes = blobJson.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+
+        WebClient webClient = WebClient.builder()
+                .baseUrl("http://localhost:" + server.getAddress().getPort())
+                .clientConnector(new ReactorClientHttpConnector())
+                .build();
+        GitHubClient client = new GitHubClient(webClient);
+
+        List<AiReviewFile> files = client.fetchPullRequestFiles("octocat", "hello-world", 42, "headsha", "token");
+
+        assertThat(files).hasSize(3);
+        for (AiReviewFile f : files) {
+            assertThat(f.diff()).as("diff for %s", f.path()).isNotNull();
+            assertThat(f.fullContent()).as("fullContent for %s", f.path()).isNotNull();
+        }
+        AiReviewFile normal = files.stream().filter(f -> "normal.txt".equals(f.path())).findFirst().orElseThrow();
+        assertThat(normal.fullContent()).isEqualTo("new content");
     }
 }

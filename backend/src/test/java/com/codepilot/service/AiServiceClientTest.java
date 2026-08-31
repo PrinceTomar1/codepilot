@@ -40,7 +40,10 @@ class AiServiceClientTest {
                 .baseUrl("http://localhost:" + server.getAddress().getPort())
                 .clientConnector(new ReactorClientHttpConnector())
                 .build();
-        return new AiServiceClient(webClient, new ObjectMapper());
+        // Same client for both params here: these tests exercise post()'s error-handling, not the
+        // review-specific longer timeout (that's a real HttpClient/connector-level setting, not
+        // something a local mock server test would observe).
+        return new AiServiceClient(webClient, webClient, new ObjectMapper());
     }
 
     @Test

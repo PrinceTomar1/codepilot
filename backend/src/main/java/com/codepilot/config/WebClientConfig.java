@@ -18,14 +18,32 @@ public class WebClientConfig {
     /** LLM calls on the Python side can be slow, so a generous 60s timeout is used. */
     private static final int TIMEOUT_MS = 60_000;
 
+    // PR review runs 4 agents concurrently plus a summarizer -- real-world LLM latency variance
+    // means one of those five calls regularly exceeds 60s even though the other four return in a
+    // few seconds (confirmed live: 3-4 back within 3s, one taking 30s+). The 60s shared timeout
+    // was cutting the whole review off mid-flight, and since ai-service has no way to resume a
+    // request the caller already gave up on, every retry just restarted the same slow work from
+    // scratch -- it could never actually finish. Review is already invoked via @Async
+    // (PrReviewService), so nothing user-facing blocks on this longer budget.
+    private static final int REVIEW_TIMEOUT_MS = 180_000;
+
     @Bean
     public WebClient aiServiceWebClient(@Value("${app.ai-service.base-url}") String baseUrl) {
+        return buildAiServiceWebClient(baseUrl, TIMEOUT_MS);
+    }
+
+    @Bean
+    public WebClient aiServiceReviewWebClient(@Value("${app.ai-service.base-url}") String baseUrl) {
+        return buildAiServiceWebClient(baseUrl, REVIEW_TIMEOUT_MS);
+    }
+
+    private WebClient buildAiServiceWebClient(String baseUrl, int timeoutMs) {
         HttpClient httpClient = HttpClient.create()
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, TIMEOUT_MS)
-                .responseTimeout(java.time.Duration.ofMillis(TIMEOUT_MS))
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.min(timeoutMs, TIMEOUT_MS))
+                .responseTimeout(java.time.Duration.ofMillis(timeoutMs))
                 .doOnConnected(conn -> conn
-                        .addHandlerLast(new ReadTimeoutHandler(TIMEOUT_MS, TimeUnit.MILLISECONDS))
-                        .addHandlerLast(new WriteTimeoutHandler(TIMEOUT_MS, TimeUnit.MILLISECONDS)));
+                        .addHandlerLast(new ReadTimeoutHandler(timeoutMs, TimeUnit.MILLISECONDS))
+                        .addHandlerLast(new WriteTimeoutHandler(timeoutMs, TimeUnit.MILLISECONDS)));
 
         return WebClient.builder()
                 .baseUrl(baseUrl)
