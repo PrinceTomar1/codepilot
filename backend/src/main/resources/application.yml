@@ -104,27 +104,23 @@ app:
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
   mail:
     from: ${MAIL_FROM:no-reply@codepilot.local}
-    # "smtp" (default) talks to whatever MAIL_HOST/PORT above point at -- Mailpit locally, a real
-    # SMTP relay in prod. "resend"/"sendgrid" call those providers' HTTP APIs instead: several PaaS
-    # providers (Railway among them) block outbound SMTP entirely on their free tier, and an HTTP
-    # call over 443 sidesteps that. Resend's sandbox sender can only reach the Resend account's own
-    # email until a domain is verified; SendGrid's free tier has no such restriction once its one
-    # Single Sender address is verified (no domain needed there either) -- see EmailService.
+    # "smtp" (default) talks to whatever MAIL_HOST/PORT above point at -- Mailpit locally. "sendgrid"
+    # calls SendGrid's HTTP API instead: several PaaS providers (Railway among them) block outbound
+    # SMTP entirely on their free tier, and an HTTP call over 443 sidesteps that -- see EmailService.
     provider: ${MAIL_PROVIDER:smtp}
-    resend:
-      api-key: ${RESEND_API_KEY:}
-      # Deliberately separate from MAIL_FROM (the SMTP sender) -- Resend 403s any "from" whose
-      # domain isn't verified with them, and a real inbox address doesn't qualify just for being
-      # real. Empty by default so EmailService falls back to Resend's own sandbox sender.
-      from: ${RESEND_FROM_ADDRESS:}
     sendgrid:
       api-key: ${SENDGRID_API_KEY:}
       # Must be exactly the address verified as a Single Sender at
-      # app.sendgrid.com/settings/sender_auth -- SendGrid 403s anything else, same reasoning as
-      # Resend's from above.
+      # app.sendgrid.com/settings/sender_auth -- SendGrid 403s anything else. Deliberately separate
+      # from MAIL_FROM (the SMTP sender) since that's very unlikely to be the same verified address.
       from: ${SENDGRID_FROM_ADDRESS:}
   verification:
     token-expiration-ms: ${VERIFICATION_TOKEN_EXPIRATION_MS:86400000}
+  password-reset:
+    # Deliberately much shorter than the email-verification window above -- a reset token grants
+    # an immediate password change, so a narrower blast radius if a reset email sits unread in an
+    # inbox that later gets compromised. 1 hour by default.
+    token-expiration-ms: ${PASSWORD_RESET_TOKEN_EXPIRATION_MS:3600000}
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
     ai:
@@ -142,6 +138,9 @@ app:
     verify-code:
       limit: ${RATE_LIMIT_VERIFY_CODE_LIMIT:10}
       window-seconds: ${RATE_LIMIT_VERIFY_CODE_WINDOW_SECONDS:900}
+    forgot-password:
+      limit: ${RATE_LIMIT_FORGOT_PASSWORD_LIMIT:5}
+      window-seconds: ${RATE_LIMIT_FORGOT_PASSWORD_WINDOW_SECONDS:3600}
 
 logging:
   level:

@@ -161,7 +161,7 @@ the GitHub webhook (which is HMAC-signature-verified instead). Full interactive 
 
 | Group | Base path | Covers |
 |---|---|---|
-| Auth | `/api/auth` | register, login, email verification (link + 6-digit code), resend, GitHub OAuth, `/me` |
+| Auth | `/api/auth` | register, login, email verification (link + 6-digit code), resend, forgot/reset password, GitHub OAuth, `/me` |
 | Repositories | `/api/repositories` | list/connect/get, list-my-GitHub-repos, connect-from-GitHub (any owner) |
 | Ask (Q&A) | `/api/repositories/{id}/ask`, `/qa-history` | chatbot questions + history |
 | Search | `/api/repositories/{id}/search` | code search, no LLM call |

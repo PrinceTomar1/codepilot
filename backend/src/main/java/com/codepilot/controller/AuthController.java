@@ -1,11 +1,13 @@
 package com.codepilot.controller;
 
 import com.codepilot.dto.auth.AuthResponse;
+import com.codepilot.dto.auth.ForgotPasswordRequest;
 import com.codepilot.dto.auth.LoginRequest;
 import com.codepilot.dto.auth.MessageResponse;
 import com.codepilot.dto.auth.RegisterRequest;
 import com.codepilot.dto.auth.RegisterResponse;
 import com.codepilot.dto.auth.ResendVerificationRequest;
+import com.codepilot.dto.auth.ResetPasswordRequest;
 import com.codepilot.dto.auth.UserDto;
 import com.codepilot.dto.auth.VerifyCodeRequest;
 import com.codepilot.exception.ApiException;
@@ -72,6 +74,16 @@ public class AuthController {
         return ResponseEntity.ok(authService.resendVerification(request.email()));
     }
 
+    @PostMapping("/forgot-password")
+    public ResponseEntity<MessageResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        return ResponseEntity.ok(authService.forgotPassword(request.email()));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return ResponseEntity.ok(authService.resetPassword(request.token(), request.newPassword()));
+    }
+
     @GetMapping("/me")
     public ResponseEntity<UserDto> me(@AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(authService.me(principal.getId()));
@@ -86,6 +98,7 @@ public class AuthController {
         String state = gitHubOAuthService.generateState();
         ResponseCookie cookie = ResponseCookie.from(OAUTH_STATE_COOKIE, state)
                 .httpOnly(true)
+                .secure(isSecureContext())
                 .path("/api/auth/github")
                 .maxAge(Duration.ofMinutes(10))
                 // Lax (not Strict): this cookie must still be sent on the top-level GET redirect
@@ -104,7 +117,7 @@ public class AuthController {
                                 HttpServletResponse response) throws IOException {
         // Always clear the state cookie -- it's single-use regardless of outcome.
         ResponseCookie clear = ResponseCookie.from(OAUTH_STATE_COOKIE, "")
-                .httpOnly(true).path("/api/auth/github").maxAge(0).sameSite("Lax").build();
+                .httpOnly(true).secure(isSecureContext()).path("/api/auth/github").maxAge(0).sameSite("Lax").build();
         response.addHeader(HttpHeaders.SET_COOKIE, clear.toString());
 
         if (error != null) {
@@ -130,6 +143,14 @@ public class AuthController {
     private void redirectWithError(HttpServletResponse response, String message) throws IOException {
         response.sendRedirect(frontendUrl + "/login?oauth_error="
                 + URLEncoder.encode(message, StandardCharsets.UTF_8));
+    }
+
+    // The Secure flag can't just be hardcoded true: local dev runs the backend over plain HTTP
+    // (localhost:8080), and browsers silently refuse to send/store a Secure cookie there at all --
+    // that would break GitHub OAuth locally. frontendUrl is already the one property that reliably
+    // differs by scheme between the two (https:// in every real deployment, http://localhost in dev).
+    private boolean isSecureContext() {
+        return frontendUrl != null && frontendUrl.startsWith("https://");
     }
 
     private String readCookie(HttpServletRequest request, String name) {

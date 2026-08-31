@@ -38,7 +38,7 @@ See `.env.example` for the full annotated list. The ones that actually gate func
 | `AI_PROVIDER` (+ matching key) | `anthropic` (default), `gemini`, or `ollama` — a model running entirely on your own infrastructure, no external API/key/quota at all (self-host the `ollama/ollama` image; see the `ollama` service in `docker-compose.yml` — pull a model into it once with `docker compose exec ollama ollama pull qwen2.5:7b-instruct`). Without a working provider, indexing/retrieval still work (local embedding provider), but Q&A/PR review/onboarding return a clean `503` instead of a raw failure. |
 | `EMBEDDING_PROVIDER` / `OPENAI_API_KEY` | Defaults to `local` (hashing-based, zero external calls). Set to `openai` + a key for real semantic embeddings — no schema change needed, both are fixed at 1536 dimensions. |
 | `JWT_SECRET`, `APP_ENCRYPTION_KEY` | Default to insecure dev placeholders (backend logs make this obvious). **Must** be changed before deploying anywhere real — `APP_ENCRYPTION_KEY` in particular is what protects stored GitHub tokens at rest. |
-| `MAIL_FROM` / `MAIL_HOST` / `MAIL_PORT` | Default to Mailpit's container address in Compose. Point at a real SMTP provider for production so verification emails actually reach users. |
+| `MAIL_PROVIDER` (+ matching config) | `smtp` (default, Mailpit in Compose) or `sendgrid`. **Use `sendgrid` in production** — several PaaS hosts (Railway confirmed) block outbound SMTP entirely on their free tier, so `smtp` there means verification emails silently never arrive. `SENDGRID_FROM_ADDRESS` must be exactly the address verified as a Single Sender at app.sendgrid.com/settings/sender_auth (no domain purchase needed — verifying one address you already own is enough, and free tier covers 100 emails/day). |
 | `RATE_LIMIT_*` | Sensible defaults (20 AI calls/min, 10 repo-connects/hour, 120 webhook deliveries/min, all per identity). Override per-bucket via env if needed; set `RATE_LIMIT_ENABLED=false` to disable entirely (not recommended in production). |
 
 ## Database & migrations
@@ -154,7 +154,8 @@ which now respects Railway's injected `$PORT` — see the Dockerfile's `ENTRYPOI
 | `AI_SERVICE_URL` | `http://ai-service.railway.internal:8000` (the private hostname from step 2) |
 | `JWT_SECRET` | a fresh long random value — **do not reuse the local dev one** |
 | `APP_ENCRYPTION_KEY` | same — fresh value, generated once and never rotated casually (rotating after tokens are already encrypted needs a re-encryption migration) |
-| `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_SMTP_AUTH` / `MAIL_SMTP_STARTTLS` / `MAIL_FROM` | real SMTP credentials (Gmail App Password works, same as local dev) |
+| `MAIL_PROVIDER` | `sendgrid` -- Railway blocks outbound SMTP (confirmed: both port 587 and 465 hang indefinitely until they time out), so plain SMTP credentials will never deliver here regardless of provider |
+| `SENDGRID_API_KEY` / `SENDGRID_FROM_ADDRESS` | An API key from a SendGrid account, and the exact address verified as its Single Sender (Settings → Sender Authentication → Verify a Single Sender -- no domain purchase needed) |
 | `CORS_ALLOWED_ORIGIN` / `FRONTEND_URL` | placeholder for now (e.g. `https://placeholder.vercel.app`) — comes back in step 5 |
 
 Generate the network domain Railway offers for this service (Settings → Networking → Generate

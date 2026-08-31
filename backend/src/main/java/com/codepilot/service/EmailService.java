@@ -18,23 +18,15 @@ public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
-    /** Resend's own no-verification-needed sender -- works immediately, no custom domain needed. */
-    private static final String RESEND_SANDBOX_FROM = "onboarding@resend.dev";
-
     private final JavaMailSender mailSender;
-    private final WebClient resendWebClient;
+    private final WebClient sendgridWebClient;
 
     @Value("${app.mail.from}")
     private String fromAddress;
 
+    /** "smtp" (local dev, Mailpit) or "sendgrid" (production) -- see application.yml for why. */
     @Value("${app.mail.provider}")
     private String provider;
-
-    @Value("${app.mail.resend.api-key}")
-    private String resendApiKey;
-
-    @Value("${app.mail.resend.from}")
-    private String resendFromAddress;
 
     @Value("${app.mail.sendgrid.api-key}")
     private String sendgridApiKey;
@@ -45,14 +37,8 @@ public class EmailService {
     @Value("${app.frontend-url}")
     private String frontendUrl;
 
-    private final WebClient sendgridWebClient;
-
-    public EmailService(
-            JavaMailSender mailSender,
-            @Qualifier("resendWebClient") WebClient resendWebClient,
-            @Qualifier("sendgridWebClient") WebClient sendgridWebClient) {
+    public EmailService(JavaMailSender mailSender, @Qualifier("sendgridWebClient") WebClient sendgridWebClient) {
         this.mailSender = mailSender;
-        this.resendWebClient = resendWebClient;
         this.sendgridWebClient = sendgridWebClient;
     }
 
@@ -74,12 +60,30 @@ public class EmailService {
                 <p>This code and link expire in 24 hours.</p>
                 """.formatted(code, verificationLink, verificationLink);
         String subject = "Verify your CodePilot email address";
+        return send(toEmail, subject, html);
+    }
 
+    /**
+     * @return same contract as {@link #sendVerificationEmail} -- true on hand-off success, logged
+     * either way. forgotPassword() always returns its own generic message regardless of this
+     * result, for the same account-enumeration reason resendVerification() does.
+     */
+    public boolean sendPasswordResetEmail(String toEmail, String token) {
+        String resetLink = frontendUrl + "/reset-password?token=" + token;
+        String html = """
+                <p>A password reset was requested for your CodePilot account.</p>
+                <p><a href="%s">Click here to choose a new password</a></p>
+                <p>Or paste this link into your browser: %s</p>
+                <p>This link expires in 1 hour. If you didn't request this, you can safely ignore
+                this email -- your password won't be changed.</p>
+                """.formatted(resetLink, resetLink);
+        String subject = "Reset your CodePilot password";
+        return send(toEmail, subject, html);
+    }
+
+    private boolean send(String toEmail, String subject, String html) {
         if ("sendgrid".equalsIgnoreCase(provider)) {
             return sendViaSendgrid(toEmail, subject, html);
-        }
-        if ("resend".equalsIgnoreCase(provider)) {
-            return sendViaResend(toEmail, subject, html);
         }
         return sendViaSmtp(toEmail, subject, html);
     }
@@ -95,44 +99,16 @@ public class EmailService {
             mailSender.send(message);
             return true;
         } catch (Exception e) {
-            log.error("Failed to send verification email to {} via SMTP", toEmail, e);
-            return false;
-        }
-    }
-
-    private boolean sendViaResend(String toEmail, String subject, String html) {
-        // Deliberately not reusing app.mail.from here: that's the SMTP-path sender, and Resend
-        // rejects (403) any "from" whose domain isn't verified with them specifically -- a real
-        // inbox address like a personal Gmail one doesn't qualify just because it's a real address
-        // in general. RESEND_FROM_ADDRESS defaults to Resend's own sandbox sender, which works
-        // immediately with zero domain setup; override it once you've verified a domain with them.
-        String from = (resendFromAddress == null || resendFromAddress.isBlank())
-                ? RESEND_SANDBOX_FROM
-                : resendFromAddress;
-        try {
-            resendWebClient.post()
-                    .uri("/emails")
-                    .header("Authorization", "Bearer " + resendApiKey)
-                    .bodyValue(Map.of(
-                            "from", from,
-                            "to", List.of(toEmail),
-                            "subject", subject,
-                            "html", html))
-                    .retrieve()
-                    .toBodilessEntity()
-                    .block();
-            return true;
-        } catch (Exception e) {
-            log.error("Failed to send verification email to {} via Resend", toEmail, e);
+            log.error("Failed to send email to {} via SMTP", toEmail, e);
             return false;
         }
     }
 
     private boolean sendViaSendgrid(String toEmail, String subject, String html) {
-        // Unlike Resend's sandbox, SendGrid's free tier lets a Single Sender (one email address
-        // you verify by clicking a link they send it -- no domain, no DNS) send to ANY recipient,
-        // 100/day forever. sendgridFromAddress must be exactly that verified address; SendGrid
-        // rejects (403) anything else the same way Resend rejects an unverified domain.
+        // sendgridFromAddress must be exactly the address verified as a Single Sender in
+        // SendGrid's dashboard (Settings -> Sender Authentication) -- SendGrid 403s anything else.
+        // Unlike some providers' sandbox senders, a verified Single Sender can send to ANY
+        // recipient with no domain/DNS setup required, 100 emails/day free.
         if (sendgridFromAddress == null || sendgridFromAddress.isBlank()) {
             log.error("Cannot send via SendGrid: app.mail.sendgrid.from (SENDGRID_FROM_ADDRESS) is not set");
             return false;
@@ -151,7 +127,7 @@ public class EmailService {
                     .block();
             return true;
         } catch (Exception e) {
-            log.error("Failed to send verification email to {} via SendGrid", toEmail, e);
+            log.error("Failed to send email to {} via SendGrid", toEmail, e);
             return false;
         }
     }

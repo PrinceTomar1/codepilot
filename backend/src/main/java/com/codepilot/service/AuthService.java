@@ -40,6 +40,9 @@ public class AuthService {
     @Value("${app.verification.token-expiration-ms}")
     private long verificationTokenExpirationMs;
 
+    @Value("${app.password-reset.token-expiration-ms}")
+    private long resetTokenExpirationMs;
+
     private static String generateVerificationCode() {
         return "%06d".formatted(RANDOM.nextInt(1_000_000));
     }
@@ -166,6 +169,42 @@ public class AuthService {
         });
 
         return new MessageResponse(genericMessage);
+    }
+
+    @Transactional
+    public MessageResponse forgotPassword(String email) {
+        // Same anti-enumeration reasoning as resendVerification() -- a constant response
+        // regardless of whether the account exists, is unverified, or the send fails.
+        String genericMessage = "If that account exists, we've sent a password reset link.";
+
+        userRepository.findByEmail(email.toLowerCase()).ifPresent(user -> {
+            String token = UUID.randomUUID().toString();
+            user.setResetToken(token);
+            user.setResetTokenExpiresAt(Instant.now().plusMillis(resetTokenExpirationMs));
+            userRepository.save(user);
+            emailService.sendPasswordResetEmail(user.getEmail(), token);
+        });
+
+        return new MessageResponse(genericMessage);
+    }
+
+    @Transactional
+    public MessageResponse resetPassword(String token, String newPassword) {
+        User user = userRepository.findByResetToken(token)
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Invalid or expired reset link."));
+
+        if (user.getResetTokenExpiresAt() == null || user.getResetTokenExpiresAt().isBefore(Instant.now())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Reset link expired. Request a new one.");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        // Single-use: clear it immediately so the same link can't reset the password twice, and
+        // so a token leaked after use (e.g. in a proxy/browser-history log) is already dead.
+        user.setResetToken(null);
+        user.setResetTokenExpiresAt(null);
+        userRepository.save(user);
+
+        return new MessageResponse("Password reset. You can sign in with your new password now.");
     }
 
     @Transactional(readOnly = true)

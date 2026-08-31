@@ -51,6 +51,24 @@ export async function verifyCode(
   return data
 }
 
+export async function forgotPassword(email: string): Promise<MessageResponse> {
+  const { data } = await apiClient.post<MessageResponse>('/auth/forgot-password', {
+    email,
+  })
+  return data
+}
+
+export async function resetPassword(
+  token: string,
+  newPassword: string,
+): Promise<MessageResponse> {
+  const { data } = await apiClient.post<MessageResponse>('/auth/reset-password', {
+    token,
+    newPassword,
+  })
+  return data
+}
+
 export async function getCurrentUser(): Promise<User> {
   const { data } = await apiClient.get<User>('/auth/me')
   return data

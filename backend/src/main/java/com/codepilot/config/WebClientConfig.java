@@ -51,22 +51,6 @@ public class WebClientConfig {
                 .build();
     }
 
-    /** api.resend.com -- see EmailService; only used when app.mail.provider=resend. */
-    @Bean
-    public WebClient resendWebClient() {
-        HttpClient httpClient = HttpClient.create()
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, TIMEOUT_MS)
-                .responseTimeout(java.time.Duration.ofMillis(TIMEOUT_MS))
-                .doOnConnected(conn -> conn
-                        .addHandlerLast(new ReadTimeoutHandler(TIMEOUT_MS, TimeUnit.MILLISECONDS))
-                        .addHandlerLast(new WriteTimeoutHandler(TIMEOUT_MS, TimeUnit.MILLISECONDS)));
-
-        return WebClient.builder()
-                .baseUrl("https://api.resend.com")
-                .clientConnector(new ReactorClientHttpConnector(httpClient))
-                .build();
-    }
-
     /** api.sendgrid.com -- see EmailService; only used when app.mail.provider=sendgrid. */
     @Bean
     public WebClient sendgridWebClient() {
