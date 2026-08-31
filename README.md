@@ -1,23 +1,45 @@
 # CodePilot - AI Codebase intelligence
 
-CodePilot connects to a GitHub repository, indexes it into a RAG (retrieval-augmented generation)
-knowledge base, and gives a developer four things on top of that index:
+A RAG-powered GitHub codebase assistant: connect a repository, ask questions about it in plain
+English and get answers grounded in the actual code with file-level citations, and get an
+agentic AI pipeline that reviews pull requests for bugs, security issues, code smells,
+performance problems, and missing test coverage — automatically on every PR, or on demand.
 
-1. **Codebase Q&A (chatbot)** — ask questions in plain English and get answers grounded in the
-   actual code, with file + line citations ("Where is authentication implemented?"). Falls back to
-   general knowledge (clearly labeled, no false citations) for off-topic questions, and refuses
-   rather than guessing when nothing relevant is indexed.
-2. **Code search** — the same hybrid retrieval as the chatbot, without the LLM step: exact
-   keyword/symbol/filename matches and vector-similarity matches, ranked and returned directly.
-3. **Agentic PR review** — four specialized AI agents (bugs, security, test coverage, code
-   quality/performance) analyze a pull request's changed files concurrently and produce a merged
-   review report, triggered automatically by a GitHub webhook or manually from the UI.
-4. **Onboarding docs** — auto-generated architecture overview, important modules, setup
-   instructions, data flow, and a "read this first" file list for a new engineer joining the repo.
-5. **Architecture graph** — a visual, auto-derived module/dependency graph of the indexed repo.
+## Live Demo
 
-Each of these works end-to-end against real GitHub repositories with real LLM calls — see
-[Testing](#testing) below.
+**https://codepilot-beta-six.vercel.app**
+
+## GitHub Repository
+
+**https://github.com/PrinceTomar1/codepilot**
+
+## Features
+
+- **RAG-powered codebase assistant** — ask questions in plain English ("Where is authentication
+  implemented?") and get answers grounded in the actual indexed code, not generic LLM knowledge.
+- **File-level references** — every chatbot answer cites the specific file and line range it drew
+  from, so you can verify the answer against the real source instead of trusting it blindly.
+- **Vector search** — pgvector (HNSW-indexed) similarity search combined with exact
+  keyword/symbol/filename matching, so both "find code like this" and "find this exact name"
+  queries work well.
+- **Repository indexing** — chunks source by file/symbol, skips `.git`/`node_modules`/build
+  output/binaries/dependency lockfiles/anything that looks like a secret, and re-indexes
+  incrementally via SHA-256 file-hash diffing (unchanged files are never re-embedded).
+- **Agentic PR review** — four specialized AI agents (bugs, security, code quality/performance,
+  test coverage) analyze a pull request's changed files concurrently and produce one merged,
+  categorized review report — triggered automatically by a GitHub webhook, or manually from the UI.
+- **GitHub webhooks** — signature-verified (constant-time HMAC comparison) and deduplicated via
+  Redis, so a redelivered GitHub webhook never produces a duplicate review or double-indexes a push.
+- **GitHub integration** — connect via OAuth (pick from your own repos, or type any owner/repo you
+  have read access to) or a pasted personal access token; both work the same way once connected.
+- **Authentication** — email/password with 6-digit-code or link-based email verification, forgot
+  /reset password, and "Continue with GitHub" OAuth as a second login option. JWT-based sessions.
+- **Onboarding docs & architecture graph** — auto-generated architecture overview, key modules, a
+  "read this first" file list for a new engineer, and a visual module/dependency graph — both
+  derived directly from the indexed repository, not hand-written.
+
+Every one of these has been run end-to-end in production against real GitHub repositories and
+real LLM calls — see [Testing](#testing) below.
 
 ## Architecture
 
@@ -53,37 +75,36 @@ retrieval pipeline, and [`docs/agents.md`](docs/agents.md) for the review/onboar
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18, TypeScript, Vite, TanStack Query, Tailwind CSS, React Router 7, Vitest + Testing Library |
+| Frontend | React 18, TypeScript, Vite (route-level code splitting), TanStack Query, Tailwind CSS, React Router 7, Vitest + Testing Library |
 | Backend | Spring Boot 3.3.4, Java 21, Spring Security (JWT), Spring Data JPA, Flyway, JUnit 5 + Mockito |
 | AI service | Python, FastAPI, SQLAlchemy (async), Pydantic, pytest |
-| Database | PostgreSQL 16 + pgvector (HNSW index for similarity search) |
-| Cache / rate limiting / idempotency | Redis 7 (fails open — the app stays functional if Redis is unavailable) |
-| LLM | Pluggable: Anthropic Claude, Google Gemini, or **Ollama** (a model running entirely on your own machine — no external API, no key, no quota) |
+| Database | PostgreSQL + pgvector (HNSW index for similarity search) |
+| Cache / rate limiting / idempotency | Redis (fails open — the app stays functional if Redis is unavailable) |
+| LLM | Pluggable: Anthropic Claude, Google Gemini, or Ollama (a model running entirely on your own machine — no external API, no key, no quota) |
 | Embeddings | Pluggable: a local zero-dependency hashing provider (default), or OpenAI's real embedding models |
-| Containerization | Docker / docker-compose (Postgres, Redis, Mailpit, ai-service, backend, frontend, and optionally Ollama) |
+| Email | Pluggable: SMTP (local dev, via a bundled Mailpit catcher) or SendGrid (production — several PaaS hosts block outbound SMTP, so an HTTP-API provider is what actually delivers there) |
+| Deployment | Railway (backend, ai-service, PostgreSQL, Redis) + Vercel (frontend); Docker / docker-compose for local/self-hosted |
 
-## Features
+## How it works
 
-- **Auth**: email/password with email verification (code + link), and "Continue with GitHub"
-  OAuth as a second login option. JWT-based sessions.
-- **Repository connection**: pick from your own GitHub repos (via OAuth token), connect *any*
-  public repo or one you collaborate on by owner/name, or paste a personal access token manually.
-- **Indexing**: chunks source by file/symbol, skips `.git`/`node_modules`/build output/binaries/
-  dependency lockfiles/anything that looks like a secret, and re-indexes incrementally via
-  SHA-256 file-hash diffing (unchanged files are skipped, not re-embedded).
-- **Hybrid retrieval**: vector similarity (pgvector, HNSW-indexed) combined with exact
-  keyword/symbol/filename matching, weighted by how rare each keyword actually is in the repo —
-  so a specific term isn't buried under a common one just because it's shorter.
-- **PR review**: bug, security, quality, and test-coverage agents run concurrently; findings
-  include a suggested code fix (diff) where the agent can propose one; results persist and render
-  in a dashboard.
-- **Webhooks**: signature-verified (constant-time HMAC comparison), deduplicated via Redis so a
-  redelivered GitHub webhook never produces a duplicate review or double-indexes a push.
-- **Security**: every resource-scoped endpoint verifies the requesting user actually owns that
-  resource (audited endpoint-by-endpoint — no way to read another user's repository by changing
-  an ID); GitHub tokens and encryption keys are AES-256-GCM encrypted at rest; every LLM call that
-  touches repository content carries an explicit prompt-injection defense notice, since repo
-  content (READMEs, comments, diffs) is treated as untrusted data, never as instructions.
+**Repository ingestion (RAG):** connecting a repo fetches its file tree from the GitHub API,
+filters out anything irrelevant or secret-bearing, and sends the rest to `ai-service`. Each file
+is chunked by structural boundaries (function/class, with a fallback for unsupported languages),
+embedded, and stored in `pgvector` alongside a SHA-256 hash of its content. Re-indexing (e.g. after
+a push webhook) re-hashes every file and only touches the ones that actually changed.
+
+**Asking a question:** the question is embedded and matched against the repo's stored chunks
+using hybrid retrieval — vector similarity plus exact keyword/symbol matching, weighted so a rare,
+specific term isn't buried under a common short one. The top-ranked chunks become the LLM's
+context, and the model is instructed to answer only from that context and cite exactly which
+file/lines it used — it refuses rather than guessing when nothing relevant is indexed, and falls
+back to clearly-labeled general knowledge (never a false citation) for off-topic questions.
+
+**PR review:** a GitHub webhook (or a manual trigger from the UI) fetches the pull request's
+changed files and diffs from GitHub, then runs four specialized agents — bugs, security, code
+quality/performance, test coverage — concurrently against that content. Each agent's findings are
+merged into one categorized report and persisted; a suggested code fix is included where an agent
+can propose one.
 
 ## Quick start (Docker)
 
@@ -100,7 +121,7 @@ docker compose up --build
   http://localhost:8025
 
 Register a user in the UI, click the verification link (check Mailpit if you don't have a real
-SMTP provider configured — see [Environment variables](#environment-variables)), sign in, connect
+mail provider configured — see [Environment variables](#environment-variables)), sign in, connect
 a GitHub repo, wait for indexing to finish, then try the Ask/Search/PR Reviews/Onboarding tabs.
 
 **No demo/seeded account exists** — registration is self-serve. Use your own email (or any address
@@ -137,7 +158,8 @@ npm run dev
 
 Copy `.env.example` → `.env` at the repo root (read by docker-compose and by the backend when run
 natively). `ai-service/.env.example` is for running the AI service natively outside Docker.
-**Never commit `.env`** — it's already gitignored.
+**Never commit `.env`** — it's already gitignored, and only variable *names* are documented here
+and in `.env.example`, never real values.
 
 | Variable | Purpose | Default |
 |---|---|---|
@@ -149,15 +171,16 @@ natively). `ai-service/.env.example` is for running the AI service natively outs
 | `OPENAI_API_KEY` | Required only if `EMBEDDING_PROVIDER=openai` | — |
 | `JWT_SECRET` / `APP_ENCRYPTION_KEY` | **Change before deploying anywhere real.** Sign JWTs / encrypt stored GitHub tokens | dev-only insecure defaults |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` / `GITHUB_OAUTH_REDIRECT_URI` | "Continue with GitHub" login — optional, leave blank to disable. Register an OAuth App at [github.com/settings/developers](https://github.com/settings/developers) | — |
-| `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_SMTP_AUTH` / `MAIL_SMTP_STARTTLS` | Real SMTP provider for verification emails. Leave unset in Docker to use the bundled Mailpit catcher | `mailpit:1025` (Docker) |
+| `MAIL_PROVIDER` | `smtp` (local dev) or `sendgrid` (production — see [Deployment](#deployment)) | `smtp` |
+| `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_SMTP_AUTH` / `MAIL_SMTP_STARTTLS` / `MAIL_FROM` | `MAIL_PROVIDER=smtp` only. Leave unset in Docker to use the bundled Mailpit catcher | `mailpit:1025` (Docker) |
+| `SENDGRID_API_KEY` / `SENDGRID_FROM_ADDRESS` | `MAIL_PROVIDER=sendgrid` only. `SENDGRID_FROM_ADDRESS` must be a Single Sender verified in SendGrid's dashboard (no domain purchase needed) | — |
 | `CORS_ALLOWED_ORIGIN` / `FRONTEND_URL` | **Must be set to your real domain before deploying** — default only works for local dev | `http://localhost:5173` |
-| `MAIL_FROM` | From-address on verification emails | `no-reply@codepilot.local` |
 
 ## API overview
 
-All backend routes are under `/api`, JWT-authenticated except registration/login/verification and
-the GitHub webhook (which is HMAC-signature-verified instead). Full interactive docs at
-`/swagger-ui/index.html` once the backend is running.
+All backend routes are under `/api`, JWT-authenticated except registration/login/verification/
+password-reset and the GitHub webhook (which is HMAC-signature-verified instead). Full interactive
+docs at `/swagger-ui/index.html` once the backend is running.
 
 | Group | Base path | Covers |
 |---|---|---|
@@ -174,7 +197,7 @@ the GitHub webhook (which is HMAC-signature-verified instead). Full interactive 
 
 ```
 Suite                  Command                          Result
-Backend                cd backend && mvn test           64/64 passing
+Backend                cd backend && mvn test           70/70 passing
 AI service             cd ai-service && pytest          145/145 passing
 Frontend               cd frontend && npx vitest run    68/68 passing
 Frontend typecheck     cd frontend && npx tsc --noEmit  clean
@@ -182,14 +205,25 @@ Frontend prod build    cd frontend && npm run build     clean
 Frontend lint          cd frontend && npx eslint src    0 errors
 ```
 
-Covers registration + email verification, GitHub OAuth login, connecting a repo you don't own,
-incremental indexing, the chatbot with citations across multiple repos and question types,
-standalone code search, a full PR review across all four agents, onboarding doc generation,
-Redis-down graceful degradation, the fully-local Ollama LLM path, and a full `docker compose up
---build` boot of all six services.
+Covers registration + email verification, forgot/reset password, GitHub OAuth login, connecting a
+repo you don't own, incremental indexing, the chatbot with citations across multiple repos and
+question types, standalone code search, a full PR review across all four agents, onboarding doc
+generation, Redis-down graceful degradation, the fully-local Ollama LLM path, and a full
+`docker compose up --build` boot of all six services.
 
-One thing worth flagging if you're pointing `MAIL_HOST` at a real provider: SMTP submission
-succeeding doesn't guarantee inbox delivery outside spam, so check that once when you set it up.
+All of the above has additionally been re-verified live in production (not just locally): a real
+registration receiving a real email, a real GitHub PR reviewed end-to-end with a real categorized
+report, a real repository indexed and queried through the deployed chatbot.
+
+## Deployment
+
+Live architecture: **Vercel** (frontend, static build) + **Railway** (backend, ai-service,
+PostgreSQL+pgvector, Redis). See [`docs/deployment.md`](docs/deployment.md) for the full concrete
+setup steps, including exactly which environment variables each Railway service needs.
+
+The one deployment-specific thing worth knowing: several PaaS hosts (Railway confirmed) block
+outbound SMTP entirely on their free tier, so production email delivery uses `MAIL_PROVIDER=sendgrid`
+(an HTTP API, not SMTP) rather than the SMTP setup that works fine locally.
 
 ## Known limitations
 
@@ -199,7 +233,8 @@ succeeding doesn't guarantee inbox delivery outside spam, so check that once whe
   review" button is the workaround until that's built.
 - A repository renamed on GitHub after being connected (e.g. `owner/old-name` → `owner/new-name`)
   will 404 on PR review/reindex until reconnected — the app doesn't follow GitHub's redirect yet.
-- The production JS bundle (~640KB) hasn't been code-split — a performance opportunity, not a bug.
+- SendGrid's free tier caps at 100 emails/day — fine for real use, would need a paid tier only at
+  meaningfully higher signup volume.
 
 ## Repo layout
 
