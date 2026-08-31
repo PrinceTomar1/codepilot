@@ -125,33 +125,21 @@ export default function LoginPage() {
           )}
 
           {error && !justVerified && (
-            <div className="space-y-3 rounded-lg border border-rose-900/50 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">
-              <div>
-                <p>{error}</p>
-                {needsVerification && (
-                  <button
-                    type="button"
-                    onClick={handleResend}
-                    disabled={resendState !== 'idle'}
-                    className="mt-1 font-medium text-rose-200 underline underline-offset-2 hover:text-rose-100 disabled:opacity-60"
-                  >
-                    {resendState === 'sent'
-                      ? 'Verification email sent — check your inbox'
-                      : resendState === 'sending'
-                        ? 'Sending…'
-                        : 'Resend verification email'}
-                  </button>
-                )}
-              </div>
+            <div className="rounded-lg border border-rose-900/50 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">
+              <p>{error}</p>
               {needsVerification && (
-                <VerifyCodeForm
-                  email={email}
-                  onVerified={() => {
-                    setJustVerified(true)
-                    setError(null)
-                    setNeedsVerification(false)
-                  }}
-                />
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resendState !== 'idle'}
+                  className="mt-1 font-medium text-rose-200 underline underline-offset-2 hover:text-rose-100 disabled:opacity-60"
+                >
+                  {resendState === 'sent'
+                    ? 'Verification email sent — check your inbox'
+                    : resendState === 'sending'
+                      ? 'Sending…'
+                      : 'Resend verification email'}
+                </button>
               )}
             </div>
           )}
@@ -177,6 +165,25 @@ export default function LoginPage() {
             Continue with GitHub
           </a>
         </form>
+
+        {/* Deliberately outside the <form> above: VerifyCodeForm renders its own <form>, and a
+            <form> nested inside another <form> is invalid HTML -- browsers handle the inner
+            submit unpredictably, commonly routing it to the outer (login) form instead of this
+            one. That's a real, confirmed-live bug: clicking "Verify" here did nothing, or
+            silently re-triggered a login attempt, because the click never reliably reached
+            VerifyCodeForm's own onSubmit. */}
+        {error && !justVerified && needsVerification && (
+          <div className="mt-3">
+            <VerifyCodeForm
+              email={email}
+              onVerified={() => {
+                setJustVerified(true)
+                setError(null)
+                setNeedsVerification(false)
+              }}
+            />
+          </div>
+        )}
 
         <p className="mt-5 text-center text-sm text-slate-500">
           Don&apos;t have an account?{' '}
