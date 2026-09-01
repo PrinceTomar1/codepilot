@@ -20,6 +20,7 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -64,9 +65,18 @@ public class SecurityConfig {
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
-        String allowedOrigin = env.getProperty("app.cors.allowed-origin", "http://localhost:5173");
+        // Comma-separated, not a single value -- a hosting migration (or a custom domain whose
+        // DNS hasn't propagated to every resolver yet) needs the OLD and NEW frontend origins
+        // both accepted for a transition window, otherwise switching this single value over is
+        // itself an outage for anyone still hitting the old one, or anyone whose resolver hasn't
+        // picked up a brand new domain yet.
+        String allowedOriginsRaw = env.getProperty("app.cors.allowed-origin", "http://localhost:5173");
+        List<String> allowedOrigins = Arrays.stream(allowedOriginsRaw.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(allowedOrigin));
+        configuration.setAllowedOrigins(allowedOrigins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
