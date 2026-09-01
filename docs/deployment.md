@@ -103,12 +103,13 @@ This is a skeleton, not a hardened production system — see `docs/ARCHITECTURE.
    would need to change before a much larger deployment (real job queue instead of an in-process
    `@Async` executor, proper ANN indexing/partitioning for pgvector, etc.).
 
-## Production deployment: Railway (backend/ai-service/DB/Redis) + Vercel (frontend)
+## Production deployment: Railway (all services)
 
-Concrete steps for the actual chosen path — Vercel only hosts the static frontend build; it
-cannot run the backend or ai-service (both are long-lived, stateful services, not a fit for
-Vercel's serverless model). Everything else runs on Railway. Do these in order, since later
-steps need URLs/values produced by earlier ones.
+Concrete steps for the actual chosen path — backend, ai-service, frontend, Postgres, and Redis
+all run as Railway services in the same project/private network. The frontend is a static Vite
+build served by nginx inside its own container (see `frontend/Dockerfile`), not a separate
+static-hosting platform. Do these in order, since later steps need URLs/values produced by
+earlier ones.
 
 ### 1. Database (Postgres + pgvector) and Redis
 
@@ -156,26 +157,36 @@ which now respects Railway's injected `$PORT` — see the Dockerfile's `ENTRYPOI
 | `APP_ENCRYPTION_KEY` | same — fresh value, generated once and never rotated casually (rotating after tokens are already encrypted needs a re-encryption migration) |
 | `MAIL_PROVIDER` | `sendgrid` -- Railway blocks outbound SMTP (confirmed: both port 587 and 465 hang indefinitely until they time out), so plain SMTP credentials will never deliver here regardless of provider |
 | `SENDGRID_API_KEY` / `SENDGRID_FROM_ADDRESS` | An API key from a SendGrid account, and the exact address verified as its Single Sender (Settings → Sender Authentication → Verify a Single Sender -- no domain purchase needed) |
-| `CORS_ALLOWED_ORIGIN` / `FRONTEND_URL` | placeholder for now (e.g. `https://placeholder.vercel.app`) — comes back in step 5 |
+| `CORS_ALLOWED_ORIGIN` / `FRONTEND_URL` | placeholder for now (e.g. `https://placeholder.up.railway.app`) — comes back in step 5 |
 
 Generate the network domain Railway offers for this service (Settings → Networking → Generate
 Domain) — this is your public backend URL, needed by the frontend next.
 
-### 4. frontend (Vercel)
+### 4. frontend
 
-Import this repo into Vercel, set the project root to `frontend/` (Vercel auto-detects Vite — no
-custom build config needed). Set one environment variable:
+New Railway service → deploy from this repo, root directory `frontend` (builds
+`frontend/Dockerfile`, a multi-stage build: `npm run build` then nginx serves the static output).
+Set one build-time variable (Vite compiles `VITE_*` vars into the JS bundle at build time, not
+read at container startup, so this must be a Railway *variable*, not something set after the fact):
 
 | Variable | Value |
 |---|---|
 | `VITE_API_BASE_URL` | `https://<your-backend-railway-domain>/api` |
 
-Deploy. Vercel gives you a `https://<project>.vercel.app` URL.
+Generate a public domain for this service too (Settings → Networking → Generate Domain).
+
+One easy-to-miss gotcha: nginx's default config hardcodes `listen 80`, but Railway's edge proxy
+connects to a dynamic `$PORT` it assigns per-deployment — the two ports usually only sometimes
+match, producing an intermittent `502 Application failed to respond` on an otherwise perfectly
+healthy container. `frontend/nginx.conf.template` listens on `${PORT}` and is copied into
+nginx's own `/etc/nginx/templates/` directory so the base image's entrypoint substitutes it in
+via `envsubst` at container startup (`PORT` defaults to 80 in the Dockerfile for local
+`docker run`/compose, where nothing else sets it).
 
 ### 5. Close the loop
 
 Go back to the backend's Railway env vars and set `CORS_ALLOWED_ORIGIN` and `FRONTEND_URL` to the
-real Vercel URL from step 4, then redeploy the backend service so the new values take effect.
+real frontend domain from step 4, then redeploy the backend service so the new values take effect.
 
 ### 6. Verify
 

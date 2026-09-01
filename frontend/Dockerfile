@@ -19,9 +19,14 @@ RUN npm run build
 FROM nginx:alpine
 
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# A .template file (not conf.d/default.conf directly) so the base image's own entrypoint
+# script runs envsubst over it at container startup, filling in $PORT -- see nginx.conf.template.
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 
+# Railway overrides PORT with its own dynamic value at runtime; this default only matters for
+# a plain `docker run` / docker-compose where nothing else sets it.
+ENV PORT=80
 EXPOSE 80
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=6 \
-    CMD wget -q --spider http://localhost/ || exit 1
+    CMD wget -q --spider http://localhost:${PORT}/ || exit 1

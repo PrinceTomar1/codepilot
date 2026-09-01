@@ -7,7 +7,7 @@ performance problems, and missing test coverage — automatically on every PR, o
 
 ## Live Demo
 
-**https://codepilot-beta-six.vercel.app**
+**https://frontend-production-522f.up.railway.app**
 
 ## GitHub Repository
 
@@ -83,7 +83,7 @@ retrieval pipeline, and [`docs/agents.md`](docs/agents.md) for the review/onboar
 | LLM | Pluggable: Anthropic Claude, Google Gemini, or Ollama (a model running entirely on your own machine — no external API, no key, no quota) |
 | Embeddings | Pluggable: a local zero-dependency hashing provider (default), or OpenAI's real embedding models |
 | Email | Pluggable: SMTP (local dev, via a bundled Mailpit catcher) or SendGrid (production — several PaaS hosts block outbound SMTP, so an HTTP-API provider is what actually delivers there) |
-| Deployment | Railway (backend, ai-service, PostgreSQL, Redis) + Vercel (frontend); Docker / docker-compose for local/self-hosted |
+| Deployment | Railway (backend, ai-service, frontend, PostgreSQL, Redis); Docker / docker-compose for local/self-hosted |
 
 ## How it works
 
@@ -217,9 +217,10 @@ deployed chatbot.
 
 ## Deployment
 
-Live architecture: **Vercel** (frontend, static build) + **Railway** (backend, ai-service,
-PostgreSQL+pgvector, Redis). See [`docs/deployment.md`](docs/deployment.md) for the full concrete
-setup steps, including exactly which environment variables each Railway service needs.
+Live architecture: **Railway** end to end — frontend (static build served by nginx), backend,
+ai-service, PostgreSQL+pgvector, and Redis all run as Railway services in the same private network.
+See [`docs/deployment.md`](docs/deployment.md) for the full concrete setup steps, including exactly
+which environment variables each service needs.
 
 The one deployment-specific thing worth knowing: several PaaS hosts (Railway confirmed) block
 outbound SMTP entirely on their free tier, so production email delivery uses `MAIL_PROVIDER=sendgrid`

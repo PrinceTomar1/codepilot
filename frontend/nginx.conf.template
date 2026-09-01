@@ -1,5 +1,11 @@
 server {
-    listen 80;
+    # Railway assigns a dynamic $PORT and proxies to whatever the container actually listens
+    # on -- a hardcoded "listen 80" here means Railway's edge can never reach nginx, producing
+    # a 502 even though the container itself is healthy. The nginx:alpine image's entrypoint
+    # runs envsubst over any *.template file in /etc/nginx/templates/ before starting, so this
+    # file is copied there (not straight to conf.d/) and $PORT gets substituted at container
+    # startup; PORT defaults to 80 in the Dockerfile for local `docker run` / docker-compose.
+    listen ${PORT};
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
