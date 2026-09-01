@@ -23,6 +23,17 @@ from app.services.vector_store import RetrievedChunk
 
 NO_CONTEXT_ANSWER = "I don't have enough information in the indexed code to answer that."
 
+# Nudge used to retry a refusal that shouldn't have happened -- see the retry in answer_question().
+_REFUSAL_RETRY_NUDGE = """
+
+Reminder: the CONTEXT you were given above already contains real code from this repository -- \
+you are not missing it. If your instinct is to refuse because a literal, exhaustive version of \
+the request isn't feasible in one response (e.g. "line by line" across an entire multi-file \
+repository), that is NOT the same as having no basis to answer -- give the best grounded answer \
+you can from what's shown instead (e.g. a representative walkthrough of the most important parts, \
+noting it's a subset if the full scope doesn't fit). Reserve the "I don't have enough information" \
+refusal for when the context is genuinely about something other than what's being asked."""
+
 # The model is instructed to start a response with exactly this marker (own first line) when it's
 # answering from general knowledge rather than the repository's indexed content. Detected via
 # answer_question() so citations from the (irrelevant) retrieved chunks never get attached to a
@@ -418,7 +429,27 @@ async def answer_question(
                 fast=True,
             )
             return f"_{GENERAL_KNOWLEDGE_MARKER}_\n\n{gk_answer.strip()}", []
-        return NO_CONTEXT_ANSWER, []
+
+        # Confirmed off-topic-recheck says this question IS about the repo, and `chunks` is
+        # non-empty (the early "if not chunks" return above already handled the truly-empty
+        # case) -- so the refusal is wrong, not correct-but-unwelcome. Reproduced live against a
+        # real indexed repository: "explain me the code line by line" retrieved 23 real, relevant
+        # chunks (e.g. dotnet/src/Client.cs) yet still got the flat refusal -- the model
+        # over-generalizes "I can't do this literally" (an exhaustive line-by-line account of an
+        # entire multi-file repo) into "I have no basis at all," which isn't true. One retry with
+        # an explicit corrective nudge resolves it in practice (same non-determinism the 0.0
+        # temperature comment above already documents); only give up and show the refusal if the
+        # model insists a second time.
+        retry_answer = await llm.complete(
+            system=QUERY_SYSTEM_PROMPT + UNTRUSTED_CONTENT_NOTICE + _REFUSAL_RETRY_NUDGE,
+            user=prompt,
+            max_tokens=2048,
+            temperature=0.0,
+            fast=True,
+        )
+        if NO_CONTEXT_ANSWER.lower() in retry_answer.lower():
+            return NO_CONTEXT_ANSWER, []
+        answer = retry_answer
 
     # A general-knowledge answer (question unrelated to the repo) isn't grounded in the retrieved
     # chunks at all -- attaching them as citations would misleadingly imply the repo was the

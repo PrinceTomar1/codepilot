@@ -101,22 +101,54 @@ async def test_falls_back_to_a_real_general_knowledge_answer_when_the_first_pass
     assert llm.complete.call_count == 3
 
 
-async def test_keeps_the_refusal_when_the_fallback_classifier_agrees_its_in_scope():
+async def test_keeps_the_refusal_when_the_fallback_classifier_agrees_its_in_scope_and_the_retry_also_refuses():
     # A genuinely ungrounded but IN-SCOPE question (about the code, just not covered by what's
-    # indexed) must still refuse -- the fallback is only for wrongly-refused off-topic questions.
+    # indexed) must still refuse -- the fallback is only for wrongly-refused off-topic questions,
+    # and the retry (see the next test) is only for wrongly-refused in-scope-with-context ones.
+    # Only give up once *both* the off-topic check and the corrective retry have failed to
+    # produce anything else.
     llm = AsyncMock()
-    llm.complete.side_effect = [NO_CONTEXT_ANSWER, "INSCOPE"]
+    llm.complete.side_effect = [NO_CONTEXT_ANSWER, "INSCOPE", NO_CONTEXT_ANSWER]
 
     answer, citations = await answer_question(llm, "how does the payment webhook retry logic work", [CHUNK])
 
     assert answer == NO_CONTEXT_ANSWER
     assert citations == []
-    assert llm.complete.call_count == 2
+    assert llm.complete.call_count == 3
+
+
+async def test_retries_once_and_uses_the_real_answer_when_the_first_pass_wrongly_refuses_in_scope():
+    # Real bug, reproduced live against a real indexed repository: "explain me the code line by
+    # line" retrieved 23 real, relevant chunks, yet the main pass still returned the flat refusal
+    # -- the model over-generalized "I can't do this literally" (an exhaustive line-by-line
+    # account of an entire multi-file repo) into "I have no basis at all," which wasn't true. A
+    # retry with a corrective nudge (still in-context, still grounded) produced a real cited
+    # answer. This is a *different* recovery path from the general-knowledge fallback above: the
+    # question stays in-scope the whole time, there's no GENERAL_KNOWLEDGE_MARKER involved, and
+    # the retrieved chunks' citations are still valid, since the retry answer is still grounded in
+    # them.
+    llm = AsyncMock()
+    llm.complete.side_effect = [
+        NO_CONTEXT_ANSWER,                              # the main grounded-answer pass refuses
+        "INSCOPE",                                      # the fallback classifier: this IS about the repo
+        "This imports requests (weather_app.py:1-5).",  # the retry succeeds with a real answer
+    ]
+
+    answer, citations = await answer_question(llm, "explain me the code line by line", [CHUNK])
+
+    assert answer == "This imports requests (weather_app.py:1-5)."
+    assert len(citations) == 1
+    assert citations[0].file_path == "weather_app.py"
+    assert llm.complete.call_count == 3
+    # The retry must actually carry the corrective nudge, not just repeat the identical call --
+    # otherwise it's just re-rolling the dice rather than steering the model away from the refusal.
+    retry_call = llm.complete.call_args_list[2]
+    assert "having no basis to answer" in retry_call.kwargs["system"]
 
 
 async def test_fallback_classifier_failure_keeps_the_original_refusal_rather_than_crashing():
     llm = AsyncMock()
-    llm.complete.side_effect = [NO_CONTEXT_ANSWER, RuntimeError("provider unreachable")]
+    llm.complete.side_effect = [NO_CONTEXT_ANSWER, RuntimeError("provider unreachable"), NO_CONTEXT_ANSWER]
 
     answer, citations = await answer_question(llm, "some ungrounded question", [CHUNK])
 
