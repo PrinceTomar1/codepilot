@@ -7,6 +7,7 @@ import com.codepilot.dto.auth.MessageResponse;
 import com.codepilot.dto.auth.RegisterRequest;
 import com.codepilot.dto.auth.RegisterResponse;
 import com.codepilot.dto.auth.ResendVerificationRequest;
+import com.codepilot.dto.auth.ResetPasswordWithCodeRequest;
 import com.codepilot.dto.auth.UserDto;
 import com.codepilot.dto.auth.VerifyCodeRequest;
 import com.codepilot.exception.ApiException;
@@ -83,6 +84,14 @@ public class AuthController {
     @PostMapping("/login-otp/verify")
     public ResponseEntity<AuthResponse> verifyLoginCode(@Valid @RequestBody VerifyCodeRequest request) {
         return ResponseEntity.ok(authService.verifyLoginCode(request.email(), request.code()));
+    }
+
+    // Request a code via the same /login-otp/request above -- reset-by-code shares that exact
+    // primitive (see resetPasswordWithCode()'s comment), it's just this endpoint that spends the
+    // code on a password change instead of a plain sign-in.
+    @PostMapping("/reset-password")
+    public ResponseEntity<AuthResponse> resetPasswordWithCode(@Valid @RequestBody ResetPasswordWithCodeRequest request) {
+        return ResponseEntity.ok(authService.resetPasswordWithCode(request.email(), request.code(), request.newPassword()));
     }
 
     @GetMapping("/me")

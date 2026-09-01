@@ -14,6 +14,7 @@ const OAuthCallbackPage = lazy(() => import('./pages/OAuthCallbackPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const RepositoryDetailPage = lazy(() => import('./pages/RepositoryDetailPage'))
 const LoginWithCodePage = lazy(() => import('./pages/LoginWithCodePage'))
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
 
 function PublicOnlyRoute({ children }: { children: ReactElement }) {
   const { isAuthenticated, isInitializing } = useAuth()
@@ -59,6 +60,14 @@ export default function App() {
           element={
             <PublicOnlyRoute>
               <LoginWithCodePage />
+            </PublicOnlyRoute>
+          }
+        />
+        <Route
+          path="/reset-password"
+          element={
+            <PublicOnlyRoute>
+              <ResetPasswordPage />
             </PublicOnlyRoute>
           }
         />

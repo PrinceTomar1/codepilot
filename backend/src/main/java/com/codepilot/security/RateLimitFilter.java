@@ -119,6 +119,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if ("POST".equals(method) && "/api/auth/login-otp/verify".equals(path)) {
             return new Bucket("login-otp-verify", loginOtpVerifyLimit, Duration.ofSeconds(loginOtpVerifyWindowSeconds));
         }
+        // Shares the login-otp-verify bucket/limits -- it's the same brute-forceable 6-digit
+        // code, just spent on a password change instead of a sign-in, so it needs at least as
+        // tight a guard.
+        if ("POST".equals(method) && "/api/auth/reset-password".equals(path)) {
+            return new Bucket("login-otp-verify", loginOtpVerifyLimit, Duration.ofSeconds(loginOtpVerifyWindowSeconds));
+        }
         return null;
     }
 

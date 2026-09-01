@@ -284,4 +284,73 @@ class AuthServiceTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("expired");
     }
+
+    @Test
+    void resetPasswordWithCodeSucceedsWithMatchingUnexpiredCodeAndSignsTheUserIn() {
+        User user = User.builder().id(UUID.randomUUID()).email("quinn@example.com")
+                .passwordHash("old-hash").emailVerified(true).loginCode("482913")
+                .loginCodeExpiresAt(Instant.now().plus(1, ChronoUnit.HOURS)).build();
+        when(userRepository.findByEmail("quinn@example.com")).thenReturn(Optional.of(user));
+
+        AuthResponse response = authService.resetPasswordWithCode("quinn@example.com", "482913", "newpassword123");
+
+        assertThat(response.token()).isEqualTo("jwt-token");
+        assertThat(response.user().email()).isEqualTo("quinn@example.com");
+        assertThat(user.getPasswordHash()).isEqualTo("hashed");
+        // Single-use: the same code must not still work a second time, for either purpose.
+        assertThat(user.getLoginCode()).isNull();
+        assertThat(user.getLoginCodeExpiresAt()).isNull();
+    }
+
+    @Test
+    void resetPasswordWithCodeRejectsWrongCodeWithGenericMessageAndLeavesThePasswordAlone() {
+        User user = User.builder().id(UUID.randomUUID()).email("riley@example.com")
+                .passwordHash("old-hash").emailVerified(true).loginCode("482913")
+                .loginCodeExpiresAt(Instant.now().plus(1, ChronoUnit.HOURS)).build();
+        when(userRepository.findByEmail("riley@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.resetPasswordWithCode("riley@example.com", "000000", "newpassword123"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid or expired code.");
+        assertThat(user.getPasswordHash()).isEqualTo("old-hash");
+    }
+
+    @Test
+    void resetPasswordWithCodeRejectsUnknownEmailWithSameGenericMessage() {
+        when(userRepository.findByEmail("ghost5@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.resetPasswordWithCode("ghost5@example.com", "123456", "newpassword123"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid or expired code.");
+    }
+
+    @Test
+    void resetPasswordWithCodeRejectsExpiredCodeWithDistinctMessageAndLeavesThePasswordAlone() {
+        User user = User.builder().id(UUID.randomUUID()).email("sam@example.com")
+                .passwordHash("old-hash").emailVerified(true).loginCode("482913")
+                .loginCodeExpiresAt(Instant.now().minus(1, ChronoUnit.HOURS)).build();
+        when(userRepository.findByEmail("sam@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.resetPasswordWithCode("sam@example.com", "482913", "newpassword123"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("expired");
+        assertThat(user.getPasswordHash()).isEqualTo("old-hash");
+    }
+
+    @Test
+    void aCodeUsedToResetThePasswordCanNoLongerBeUsedToSignIn() {
+        // The same login_code column backs both actions -- reset-then-reuse-for-login must fail
+        // just as cleanly as reset-then-reuse-for-reset would, since resetPasswordWithCode()
+        // clears it exactly like verifyLoginCode() does.
+        User user = User.builder().id(UUID.randomUUID()).email("taylor@example.com")
+                .passwordHash("old-hash").emailVerified(true).loginCode("482913")
+                .loginCodeExpiresAt(Instant.now().plus(1, ChronoUnit.HOURS)).build();
+        when(userRepository.findByEmail("taylor@example.com")).thenReturn(Optional.of(user));
+
+        authService.resetPasswordWithCode("taylor@example.com", "482913", "newpassword123");
+
+        assertThatThrownBy(() -> authService.verifyLoginCode("taylor@example.com", "482913"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid or expired code.");
+    }
 }

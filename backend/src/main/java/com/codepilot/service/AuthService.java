@@ -226,6 +226,43 @@ public class AuthService {
         return new AuthResponse(token, toDto(user));
     }
 
+    // Reset-by-code is deliberately built on the SAME email-a-code primitive as passwordless
+    // login (requestLoginCode() / login_code), not a separate reset_token+link mechanism (what
+    // this project had before) -- both actions need exactly the same proof (current control of
+    // the inbox), and a link-based reset email was the one that kept landing in spam even after
+    // the plain-text-alternative fix, while the bare-code sign-in email consistently didn't. One
+    // fewer moving part, one fewer thing to keep independently deliverable.
+    @Transactional
+    public AuthResponse resetPasswordWithCode(String email, String code, String newPassword) {
+        // Same generic-message reasoning as verifyLoginCode() -- one message for "no such
+        // account", "wrong code", and "expired code" alike.
+        String invalidMessage = "Invalid or expired code.";
+
+        User user = userRepository.findByEmail(email.toLowerCase())
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, invalidMessage));
+
+        if (user.getLoginCode() == null || !user.getLoginCode().equals(code)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, invalidMessage);
+        }
+
+        if (user.getLoginCodeExpiresAt() == null || user.getLoginCodeExpiresAt().isBefore(Instant.now())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Code expired. Request a new one.");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        // Single-use, same as verifyLoginCode() -- the same code must not also still be usable
+        // to sign in afterward, or usable to reset the password a second time.
+        user.setLoginCode(null);
+        user.setLoginCodeExpiresAt(null);
+        userRepository.save(user);
+
+        // Sign the user in immediately with the new password rather than making them submit the
+        // login form right after -- they've already just proven both email ownership (the code)
+        // and account control (setting a new password) in this same request.
+        String token = jwtService.generateToken(user.getId(), user.getEmail());
+        return new AuthResponse(token, toDto(user));
+    }
+
     @Transactional(readOnly = true)
     public UserDto me(UUID userId) {
         User user = userRepository.findById(userId)

@@ -73,3 +73,19 @@ export async function verifyLoginCode(
   })
   return data
 }
+
+// Requesting the code reuses requestLoginCode() above -- reset-by-code shares that exact
+// primitive (see the backend's matching comment on resetPasswordWithCode()); only spending the
+// code differs.
+export async function resetPasswordWithCode(
+  email: string,
+  code: string,
+  newPassword: string,
+): Promise<AuthResponse> {
+  const { data } = await apiClient.post<AuthResponse>('/auth/reset-password', {
+    email,
+    code,
+    newPassword,
+  })
+  return data
+}
