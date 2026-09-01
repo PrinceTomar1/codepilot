@@ -79,4 +79,39 @@ describe('ConnectRepoModal - add someone else\'s repository', () => {
     expect(await screen.findByText('Both fields are required.')).toBeInTheDocument()
     expect(post).not.toHaveBeenCalled()
   })
+
+  it('offers a fallback to the token form when the account has no GitHub OAuth token', async () => {
+    // Real bug: this mode had no way to reach the token-based form on a "Sign in with GitHub
+    // first" failure -- only "Back to my repos" was offered, which just leads back to the
+    // picker's own (different) error state instead of the token form itself.
+    vi.spyOn(apiClient, 'get').mockResolvedValue({ data: [] })
+    vi.spyOn(apiClient, 'post').mockRejectedValue({ message: 'Sign in with GitHub first.' })
+    const user = userEvent.setup()
+
+    renderWithQueryClient(<ConnectRepoModal onClose={vi.fn()} onConnected={vi.fn()} />)
+    await user.click(await screen.findByText("Add someone else's repository"))
+    await user.type(screen.getByLabelText('Owner'), 'Manas1111')
+    await user.type(screen.getByLabelText('Repository'), 'smart-crop-advisor')
+    await user.click(screen.getByRole('button', { name: 'Connect repository' }))
+
+    expect(await screen.findByText('Sign in with GitHub first.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Connect with a token instead' })).toBeInTheDocument()
+  })
+
+  it('carries the typed owner/repo over into the token form instead of making the user retype it', async () => {
+    vi.spyOn(apiClient, 'get').mockResolvedValue({ data: [] })
+    vi.spyOn(apiClient, 'post').mockRejectedValue({ message: 'Sign in with GitHub first.' })
+    const user = userEvent.setup()
+
+    renderWithQueryClient(<ConnectRepoModal onClose={vi.fn()} onConnected={vi.fn()} />)
+    await user.click(await screen.findByText("Add someone else's repository"))
+    await user.type(screen.getByLabelText('Owner'), 'Manas1111')
+    await user.type(screen.getByLabelText('Repository'), 'smart-crop-advisor')
+    await user.click(screen.getByRole('button', { name: 'Connect repository' }))
+    await user.click(await screen.findByRole('button', { name: 'Connect with a token instead' }))
+
+    expect(screen.getByLabelText('Owner')).toHaveValue('Manas1111')
+    expect(screen.getByLabelText('Repository')).toHaveValue('smart-crop-advisor')
+    expect(screen.getByLabelText(/personal access token/i)).toBeInTheDocument()
+  })
 })

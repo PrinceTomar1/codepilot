@@ -250,9 +250,32 @@ export default function ConnectRepoModal({
             </div>
 
             {formError && (
-              <p className="rounded-lg border border-rose-900/50 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">
-                {formError}
-              </p>
+              <div className="space-y-2">
+                <p className="rounded-lg border border-rose-900/50 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">
+                  {formError}
+                </p>
+                {/* Real bug: this mode had no way to reach the token-based form when the account
+                    has no GitHub OAuth token -- the picker's error state already offers "Connect
+                    with a token instead" (above), but a user who landed here directly via "Add
+                    someone else's repository" hit the exact same "Sign in with GitHub first"
+                    failure with only "Back to my repos" available, which just leads back to the
+                    picker's own (different) error state instead of the token form itself -- one
+                    extra, non-obvious hop most people wouldn't think to take. */}
+                <button
+                  type="button"
+                  className="btn-secondary w-full"
+                  onClick={() => {
+                    // Carry over what they already typed here -- no reason to make them retype
+                    // the same owner/repo into the token form right after.
+                    setGithubOwner(anyOwner)
+                    setGithubRepo(anyRepo)
+                    setFormError(null)
+                    setMode('manual')
+                  }}
+                >
+                  Connect with a token instead
+                </button>
+              </div>
             )}
 
             <div className="mt-1 flex items-center justify-between gap-2">
