@@ -59,11 +59,22 @@ export default function VerifyCodeForm({
         <button
           type="submit"
           className="btn-primary shrink-0"
-          disabled={isSubmitting || code.length !== 6}
+          disabled={isSubmitting || code.length !== 6 || !email.trim()}
         >
           {isSubmitting ? 'Verifying…' : 'Verify'}
         </button>
       </div>
+      {/* Real bug: on VerifyEmailPage specifically, `email` comes from a separate field the
+          user has to fill in themselves (this form has no way to know it from the link's token
+          alone) -- but the button wasn't disabled for a missing email, only for an incomplete
+          code. Typing a valid 6-digit code and clicking Verify without also filling in that
+          field above submitted anyway and silently rejected with a small inline error that's
+          easy to miss -- indistinguishable, from the user's side, from the button just not
+          working. Disabling the button on a missing email too, and saying so explicitly, turns
+          that into an obviously-blocked state instead of a silent no-op. */}
+      {!email.trim() && code.length === 6 && !error && (
+        <p className="text-sm text-amber-400">Enter your email above first, then click Verify.</p>
+      )}
       {error && (
         <p className="rounded-lg border border-rose-900/50 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">
           {error}

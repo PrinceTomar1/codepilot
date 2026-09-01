@@ -59,15 +59,41 @@ describe('VerifyCodeForm', () => {
     expect(onVerified).not.toHaveBeenCalled()
   })
 
-  it('shows a validation error instead of calling the API when the email prop is blank', async () => {
+  it('disables Verify and shows a hint instead of silently rejecting when the email prop is blank', async () => {
+    // Real bug: on VerifyEmailPage, `email` comes from a separate field the user fills in
+    // themselves -- typing a valid 6-digit code and clicking Verify without also filling that
+    // field in used to submit anyway and reject with a small, easy-to-miss inline error,
+    // indistinguishable from the user's side from the button just not working. The button must
+    // be visibly, obviously disabled instead, with an explicit hint of what's still needed.
     const verifyCodeSpy = vi.spyOn(authApi, 'verifyCode')
     const user = userEvent.setup()
     render(<VerifyCodeForm email="" onVerified={vi.fn()} />)
 
     await user.type(screen.getByPlaceholderText('123456'), '123456')
-    await user.click(screen.getByRole('button', { name: 'Verify' }))
 
-    expect(await screen.findByText('Enter your email above first.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled()
+    expect(
+      await screen.findByText('Enter your email above first, then click Verify.'),
+    ).toBeInTheDocument()
     expect(verifyCodeSpy).not.toHaveBeenCalled()
+  })
+
+  it('re-enables Verify once a blank email is filled in, without needing to retype the code', async () => {
+    const verifyCodeSpy = vi.spyOn(authApi, 'verifyCode').mockResolvedValue({
+      message: 'Email verified. You can sign in now.',
+    })
+    const user = userEvent.setup()
+    const { rerender } = render(<VerifyCodeForm email="" onVerified={vi.fn()} />)
+
+    await user.type(screen.getByPlaceholderText('123456'), '123456')
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled()
+
+    rerender(<VerifyCodeForm email="dev@example.com" onVerified={vi.fn()} />)
+
+    const button = screen.getByRole('button', { name: 'Verify' })
+    expect(button).toBeEnabled()
+    await user.click(button)
+
+    expect(verifyCodeSpy).toHaveBeenCalledWith('dev@example.com', '123456')
   })
 })
