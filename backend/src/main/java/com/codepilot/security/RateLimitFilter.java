@@ -70,17 +70,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Value("${app.rate-limit.verify-code.window-seconds:900}")
     private int verifyCodeWindowSeconds;
 
-    // Without this, forgot-password becomes a free way to spam someone's inbox with reset
-    // emails -- the endpoint itself must stay unauthenticated (that's the whole point), so the
-    // IP/account-level rate limit is the only guard available.
-    @Value("${app.rate-limit.forgot-password.limit:5}")
-    private int forgotPasswordLimit;
-
-    @Value("${app.rate-limit.forgot-password.window-seconds:3600}")
-    private int forgotPasswordWindowSeconds;
-
-    // Same reasoning as forgot-password: an unauthenticated endpoint that emails someone needs
-    // its own guard against becoming a free inbox-spam tool.
+    // An unauthenticated endpoint that emails someone needs its own guard against becoming a
+    // free inbox-spam tool.
     @Value("${app.rate-limit.login-otp-request.limit:5}")
     private int loginOtpRequestLimit;
 
@@ -121,9 +112,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
         if ("POST".equals(method) && "/api/auth/verify-code".equals(path)) {
             return new Bucket("verify-code", verifyCodeLimit, Duration.ofSeconds(verifyCodeWindowSeconds));
-        }
-        if ("POST".equals(method) && "/api/auth/forgot-password".equals(path)) {
-            return new Bucket("forgot-password", forgotPasswordLimit, Duration.ofSeconds(forgotPasswordWindowSeconds));
         }
         if ("POST".equals(method) && "/api/auth/login-otp/request".equals(path)) {
             return new Bucket("login-otp-request", loginOtpRequestLimit, Duration.ofSeconds(loginOtpRequestWindowSeconds));

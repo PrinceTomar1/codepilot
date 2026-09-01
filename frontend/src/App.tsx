@@ -13,8 +13,6 @@ const VerifyEmailPage = lazy(() => import('./pages/VerifyEmailPage'))
 const OAuthCallbackPage = lazy(() => import('./pages/OAuthCallbackPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const RepositoryDetailPage = lazy(() => import('./pages/RepositoryDetailPage'))
-const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'))
-const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
 const LoginWithCodePage = lazy(() => import('./pages/LoginWithCodePage'))
 
 function PublicOnlyRoute({ children }: { children: ReactElement }) {
@@ -56,15 +54,6 @@ export default function App() {
         />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
-        <Route
-          path="/forgot-password"
-          element={
-            <PublicOnlyRoute>
-              <ForgotPasswordPage />
-            </PublicOnlyRoute>
-          }
-        />
-        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route
           path="/login-with-code"
           element={

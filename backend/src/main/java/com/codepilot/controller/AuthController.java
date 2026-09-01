@@ -1,14 +1,12 @@
 package com.codepilot.controller;
 
 import com.codepilot.dto.auth.AuthResponse;
-import com.codepilot.dto.auth.ForgotPasswordRequest;
 import com.codepilot.dto.auth.LoginCodeRequest;
 import com.codepilot.dto.auth.LoginRequest;
 import com.codepilot.dto.auth.MessageResponse;
 import com.codepilot.dto.auth.RegisterRequest;
 import com.codepilot.dto.auth.RegisterResponse;
 import com.codepilot.dto.auth.ResendVerificationRequest;
-import com.codepilot.dto.auth.ResetPasswordRequest;
 import com.codepilot.dto.auth.UserDto;
 import com.codepilot.dto.auth.VerifyCodeRequest;
 import com.codepilot.exception.ApiException;
@@ -73,16 +71,6 @@ public class AuthController {
     @PostMapping("/resend-verification")
     public ResponseEntity<MessageResponse> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
         return ResponseEntity.ok(authService.resendVerification(request.email()));
-    }
-
-    @PostMapping("/forgot-password")
-    public ResponseEntity<MessageResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
-        return ResponseEntity.ok(authService.forgotPassword(request.email()));
-    }
-
-    @PostMapping("/reset-password")
-    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        return ResponseEntity.ok(authService.resetPassword(request.token(), request.newPassword()));
     }
 
     @PostMapping("/login-otp/request")

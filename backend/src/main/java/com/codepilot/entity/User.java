@@ -43,12 +43,6 @@ public class User {
     @Column(name = "verification_token_expires_at")
     private Instant verificationTokenExpiresAt;
 
-    @Column(name = "reset_token")
-    private String resetToken;
-
-    @Column(name = "reset_token_expires_at")
-    private Instant resetTokenExpiresAt;
-
     @Column(name = "login_code")
     private String loginCode;
 

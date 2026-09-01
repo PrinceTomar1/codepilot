@@ -74,34 +74,8 @@ public class EmailService {
 
     /**
      * @return same contract as {@link #sendVerificationEmail} -- true on hand-off success, logged
-     * either way. forgotPassword() always returns its own generic message regardless of this
-     * result, for the same account-enumeration reason resendVerification() does.
-     */
-    public boolean sendPasswordResetEmail(String toEmail, String token) {
-        String resetLink = frontendUrl + "/reset-password?token=" + token;
-        String html = """
-                <p>A password reset was requested for your CodePilot account.</p>
-                <p><a href="%s">Click here to choose a new password</a></p>
-                <p>Or paste this link into your browser: %s</p>
-                <p>This link expires in 1 hour. If you didn't request this, you can safely ignore
-                this email -- your password won't be changed.</p>
-                """.formatted(resetLink, resetLink);
-        String text = """
-                A password reset was requested for your CodePilot account.
-
-                Open this link to choose a new password: %s
-
-                This link expires in 1 hour. If you didn't request this, you can safely ignore
-                this email -- your password won't be changed.
-                """.formatted(resetLink);
-        String subject = "Reset your CodePilot password";
-        return send(toEmail, subject, text, html);
-    }
-
-    /**
-     * @return same contract as {@link #sendVerificationEmail} -- true on hand-off success, logged
      * either way. requestLoginCode() always returns its own generic message regardless of this
-     * result, for the same account-enumeration reason forgotPassword() does.
+     * result, for the same account-enumeration reason resendVerification() does.
      */
     public boolean sendLoginCodeEmail(String toEmail, String code) {
         String html = """

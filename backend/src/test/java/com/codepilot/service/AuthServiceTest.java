@@ -57,7 +57,6 @@ class AuthServiceTest {
 
         authService = new AuthService(userRepository, passwordEncoder, jwtService, authenticationManager, emailService);
         ReflectionTestUtils.setField(authService, "verificationTokenExpirationMs", 86_400_000L);
-        ReflectionTestUtils.setField(authService, "resetTokenExpirationMs", 3_600_000L);
         ReflectionTestUtils.setField(authService, "loginCodeExpirationMs", 600_000L);
         when(jwtService.generateToken(any(), anyString())).thenReturn("jwt-token");
 
@@ -191,67 +190,6 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.verifyCode("henry@example.com", "482913"))
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("expired");
-    }
-
-    @Test
-    void forgotPasswordSendsResetEmailAndGenericMessageForExistingAccount() {
-        User user = User.builder().id(UUID.randomUUID()).email("iris@example.com")
-                .emailVerified(true).build();
-        when(userRepository.findByEmail("iris@example.com")).thenReturn(Optional.of(user));
-
-        MessageResponse response = authService.forgotPassword("iris@example.com");
-
-        assertThat(response.message()).isEqualTo("If that account exists, we've sent a password reset link.");
-        assertThat(user.getResetToken()).isNotBlank();
-        assertThat(user.getResetTokenExpiresAt()).isAfter(Instant.now());
-        verify(emailService).sendPasswordResetEmail(eq("iris@example.com"), anyString());
-    }
-
-    @Test
-    void forgotPasswordReturnsSameGenericMessageAndSendsNothingForUnknownEmail() {
-        when(userRepository.findByEmail("ghost2@example.com")).thenReturn(Optional.empty());
-
-        MessageResponse response = authService.forgotPassword("ghost2@example.com");
-
-        assertThat(response.message()).isEqualTo("If that account exists, we've sent a password reset link.");
-        verify(emailService, never()).sendPasswordResetEmail(any(), any());
-    }
-
-    @Test
-    void resetPasswordSucceedsWithValidUnexpiredTokenAndSingleUsesIt() {
-        User user = User.builder().id(UUID.randomUUID()).email("jack@example.com")
-                .passwordHash("old-hash").resetToken("valid-token")
-                .resetTokenExpiresAt(Instant.now().plus(1, ChronoUnit.HOURS)).build();
-        when(userRepository.findByResetToken("valid-token")).thenReturn(Optional.of(user));
-
-        MessageResponse response = authService.resetPassword("valid-token", "newpassword123");
-
-        assertThat(response.message()).contains("Password reset");
-        assertThat(user.getPasswordHash()).isEqualTo("hashed");
-        assertThat(user.getResetToken()).isNull();
-        assertThat(user.getResetTokenExpiresAt()).isNull();
-    }
-
-    @Test
-    void resetPasswordRejectsUnknownToken() {
-        when(userRepository.findByResetToken("bogus")).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> authService.resetPassword("bogus", "newpassword123"))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("Invalid or expired");
-    }
-
-    @Test
-    void resetPasswordRejectsExpiredToken() {
-        User user = User.builder().id(UUID.randomUUID()).email("kelly@example.com")
-                .passwordHash("old-hash").resetToken("expired-token")
-                .resetTokenExpiresAt(Instant.now().minus(1, ChronoUnit.HOURS)).build();
-        when(userRepository.findByResetToken("expired-token")).thenReturn(Optional.of(user));
-
-        assertThatThrownBy(() -> authService.resetPassword("expired-token", "newpassword123"))
-                .isInstanceOf(ApiException.class)
-                .hasMessageContaining("expired");
-        assertThat(user.getPasswordHash()).isEqualTo("old-hash");
     }
 
     @Test
