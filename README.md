@@ -7,7 +7,7 @@ performance problems, and missing test coverage — automatically on every PR, o
 
 ## Live Demo
 
-**https://frontend-production-522f.up.railway.app**
+**https://codepilot-ai.up.railway.app**
 
 ## GitHub Repository
 
