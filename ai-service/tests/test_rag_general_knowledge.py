@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+from app.services.llm import LLMRateLimitedError
 from app.services.rag import (
     GENERAL_KNOWLEDGE_MARKER,
     NO_CONTEXT_ANSWER,
@@ -162,6 +163,38 @@ async def test_fallback_classifier_failure_does_not_crash_and_still_reaches_the_
     llm.complete.side_effect = [NO_CONTEXT_ANSWER, RuntimeError("provider unreachable"), NO_CONTEXT_ANSWER]
 
     answer, citations = await answer_question(llm, "some ungrounded question", [CHUNK])
+
+    assert answer != NO_CONTEXT_ANSWER
+    assert "weather_app.py" in answer
+    assert len(citations) == 1
+
+
+async def test_rate_limit_on_the_main_pass_falls_back_to_the_chunk_listing_without_wasting_more_calls():
+    # Real bug, hit live: a free-tier LLM quota (Gemini's 20 requests/day) runs out under normal
+    # testing/demo usage -- before this fix, a rate-limited call propagated all the way out as a
+    # raw 429 with no chatbot answer at all. It should degrade to the same grounded, non-LLM
+    # fallback used for a wrongly-refused question, and it should do so on the FIRST rate-limit
+    # error rather than burning two more (already-exhausted) quota units on the off-topic-check/
+    # retry dance, which would only hit the identical error again.
+    llm = AsyncMock()
+    llm.complete.side_effect = LLMRateLimitedError("quota exceeded")
+
+    answer, citations = await answer_question(llm, "explain me the code line by line", [CHUNK])
+
+    assert answer != NO_CONTEXT_ANSWER
+    assert "weather_app.py" in answer
+    assert len(citations) == 1
+    assert llm.complete.call_count == 1
+
+
+async def test_rate_limit_during_refusal_recovery_still_falls_back_gracefully():
+    # Same reasoning as the main-pass case above, but for a rate limit hit AFTER the main pass
+    # already refused and the off-topic classifier confirmed it's in-scope -- i.e. during the
+    # corrective-retry call specifically, not the very first call.
+    llm = AsyncMock()
+    llm.complete.side_effect = [NO_CONTEXT_ANSWER, "INSCOPE", LLMRateLimitedError("quota exceeded")]
+
+    answer, citations = await answer_question(llm, "some question", [CHUNK])
 
     assert answer != NO_CONTEXT_ANSWER
     assert "weather_app.py" in answer

@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 
 from app.models.schemas import Citation, QaTurn, SearchResult
-from app.services.llm import UNTRUSTED_CONTENT_NOTICE, LLMClient
+from app.services.llm import UNTRUSTED_CONTENT_NOTICE, LLMClient, LLMRateLimitedError
 from app.services.vector_store import RetrievedChunk
 
 NO_CONTEXT_ANSWER = "I don't have enough information in the indexed code to answer that."
@@ -421,13 +421,23 @@ async def answer_question(
     # fast=True: chatbot latency was dominated by Gemini's internal "thinking" step (observed
     # spending reasoning tokens even on trivial prompts) -- answering from given context is
     # synthesis, not the kind of exploratory problem-solving thinking mode is for.
-    answer = await llm.complete(
-        system=QUERY_SYSTEM_PROMPT + UNTRUSTED_CONTENT_NOTICE,
-        user=prompt,
-        max_tokens=2048,
-        temperature=0.0,
-        fast=True,
-    )
+    try:
+        answer = await llm.complete(
+            system=QUERY_SYSTEM_PROMPT + UNTRUSTED_CONTENT_NOTICE,
+            user=prompt,
+            max_tokens=2048,
+            temperature=0.0,
+            fast=True,
+        )
+    except LLMRateLimitedError:
+        # Real problem, hit live: a free-tier LLM quota (e.g. Gemini's 20 requests/day) runs out
+        # under completely normal testing/demo usage well before a day is up. Before this, a
+        # rate-limited call propagated all the way out as a raw 429 to the frontend -- a dead end
+        # even though `chunks` is right here, non-empty and just as usable as it is for the
+        # refusal-recovery fallback below. Skip straight to it: no point spending a second and
+        # third quota-exhausted call on the off-topic-check/retry dance first, since those would
+        # only hit the identical rate limit again.
+        return _fallback_answer_from_chunks(chunks), citations
 
     # If the model itself declares insufficient context, don't attach
     # citations that would misleadingly imply grounding was used.
@@ -441,33 +451,40 @@ async def answer_question(
         # single-purpose prompt -- a smaller model is far more reliable at one focused
         # classification than at juggling several rules in one pass (the same reasoning behind
         # moving chitchat detection out of the prompt entirely).
-        if await _looks_off_topic(llm, question):
-            gk_answer = await llm.complete(
-                system=GENERAL_KNOWLEDGE_SYSTEM_PROMPT,
-                user=question,
-                max_tokens=1024,
-                temperature=0.3,
+        try:
+            if await _looks_off_topic(llm, question):
+                gk_answer = await llm.complete(
+                    system=GENERAL_KNOWLEDGE_SYSTEM_PROMPT,
+                    user=question,
+                    max_tokens=1024,
+                    temperature=0.3,
+                    fast=True,
+                )
+                return f"_{GENERAL_KNOWLEDGE_MARKER}_\n\n{gk_answer.strip()}", []
+
+            # Confirmed off-topic-recheck says this question IS about the repo, and `chunks` is
+            # non-empty (the early "if not chunks" return above already handled the truly-empty
+            # case) -- so the refusal is wrong, not correct-but-unwelcome. Reproduced live against
+            # a real indexed repository: "explain me the code line by line" retrieved 23 real,
+            # relevant chunks (e.g. dotnet/src/Client.cs) yet still got the flat refusal -- the
+            # model over-generalizes "I can't do this literally" (an exhaustive line-by-line
+            # account of an entire multi-file repo) into "I have no basis at all," which isn't
+            # true. One retry with an explicit corrective nudge resolves it in practice (same
+            # non-determinism the 0.0 temperature comment above already documents); only give up
+            # and show the refusal if the model insists a second time.
+            retry_answer = await llm.complete(
+                system=QUERY_SYSTEM_PROMPT + UNTRUSTED_CONTENT_NOTICE + _REFUSAL_RETRY_NUDGE,
+                user=prompt,
+                max_tokens=2048,
+                temperature=0.0,
                 fast=True,
             )
-            return f"_{GENERAL_KNOWLEDGE_MARKER}_\n\n{gk_answer.strip()}", []
-
-        # Confirmed off-topic-recheck says this question IS about the repo, and `chunks` is
-        # non-empty (the early "if not chunks" return above already handled the truly-empty
-        # case) -- so the refusal is wrong, not correct-but-unwelcome. Reproduced live against a
-        # real indexed repository: "explain me the code line by line" retrieved 23 real, relevant
-        # chunks (e.g. dotnet/src/Client.cs) yet still got the flat refusal -- the model
-        # over-generalizes "I can't do this literally" (an exhaustive line-by-line account of an
-        # entire multi-file repo) into "I have no basis at all," which isn't true. One retry with
-        # an explicit corrective nudge resolves it in practice (same non-determinism the 0.0
-        # temperature comment above already documents); only give up and show the refusal if the
-        # model insists a second time.
-        retry_answer = await llm.complete(
-            system=QUERY_SYSTEM_PROMPT + UNTRUSTED_CONTENT_NOTICE + _REFUSAL_RETRY_NUDGE,
-            user=prompt,
-            max_tokens=2048,
-            temperature=0.0,
-            fast=True,
-        )
+        except LLMRateLimitedError:
+            # Same reasoning as the main pass's rate-limit handling above: quota exhaustion mid-
+            # recovery is still not the same as "genuinely no basis to answer" -- fall back to the
+            # deterministic, grounded chunk listing instead of surfacing a raw 429 partway through
+            # what was otherwise a legitimate refusal-recovery attempt.
+            return _fallback_answer_from_chunks(chunks), citations
         if NO_CONTEXT_ANSWER.lower() in retry_answer.lower():
             # Live testing showed the retry above, while it resolves most cases, is still a
             # second roll of the same non-deterministic dice -- it can refuse twice in a row on a
