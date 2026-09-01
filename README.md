@@ -33,7 +33,8 @@ performance problems, and missing test coverage — automatically on every PR, o
 - **GitHub integration** — connect via OAuth (pick from your own repos, or type any owner/repo you
   have read access to) or a pasted personal access token; both work the same way once connected.
 - **Authentication** — email/password with 6-digit-code or link-based email verification, forgot
-  /reset password, and "Continue with GitHub" OAuth as a second login option. JWT-based sessions.
+  /reset password, passwordless sign-in via a one-time emailed code, and "Continue with GitHub"
+  OAuth as a second login option. JWT-based sessions.
 - **Onboarding docs & architecture graph** — auto-generated architecture overview, key modules, a
   "read this first" file list for a new engineer, and a visual module/dependency graph — both
   derived directly from the indexed repository, not hand-written.
@@ -184,7 +185,7 @@ docs at `/swagger-ui/index.html` once the backend is running.
 
 | Group | Base path | Covers |
 |---|---|---|
-| Auth | `/api/auth` | register, login, email verification (link + 6-digit code), resend, forgot/reset password, GitHub OAuth, `/me` |
+| Auth | `/api/auth` | register, login, email verification (link + 6-digit code), resend, forgot/reset password, passwordless login-by-code, GitHub OAuth, `/me` |
 | Repositories | `/api/repositories` | list/connect/get, list-my-GitHub-repos, connect-from-GitHub (any owner) |
 | Ask (Q&A) | `/api/repositories/{id}/ask`, `/qa-history` | chatbot questions + history |
 | Search | `/api/repositories/{id}/search` | code search, no LLM call |

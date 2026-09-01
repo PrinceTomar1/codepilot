@@ -43,6 +43,13 @@ public class AuthService {
     @Value("${app.password-reset.token-expiration-ms}")
     private long resetTokenExpirationMs;
 
+    // Deliberately much shorter than the verification code's 24h and the reset link's 1h -- a
+    // login code stands in for a password on every use, not just once during signup/recovery, so
+    // it should be dead again well before anyone but the requester has a realistic chance to use
+    // a copy of it (an email forwarded, a shared inbox, a shoulder-surfed screen).
+    @Value("${app.login-otp.token-expiration-ms}")
+    private long loginCodeExpirationMs;
+
     private static String generateVerificationCode() {
         return "%06d".formatted(RANDOM.nextInt(1_000_000));
     }
@@ -205,6 +212,57 @@ public class AuthService {
         userRepository.save(user);
 
         return new MessageResponse("Password reset. You can sign in with your new password now.");
+    }
+
+    @Transactional
+    public MessageResponse requestLoginCode(String email) {
+        // Same anti-enumeration reasoning as forgotPassword() -- a constant response regardless
+        // of whether the account exists, is verified, or the send fails.
+        String genericMessage = "If that account exists and is verified, we've sent a sign-in code.";
+
+        userRepository.findByEmail(email.toLowerCase()).ifPresent(user -> {
+            // Passwordless login is an ALTERNATIVE to password login, not a way around the
+            // signup email-verification step -- it carries the same "must already be verified"
+            // requirement login() enforces via DisabledException, just checked directly here
+            // since there's no password to authenticate through AuthenticationManager with.
+            if (!user.isEmailVerified()) {
+                return;
+            }
+            String code = generateVerificationCode();
+            user.setLoginCode(code);
+            user.setLoginCodeExpiresAt(Instant.now().plusMillis(loginCodeExpirationMs));
+            userRepository.save(user);
+            emailService.sendLoginCodeEmail(user.getEmail(), code);
+        });
+
+        return new MessageResponse(genericMessage);
+    }
+
+    @Transactional
+    public AuthResponse verifyLoginCode(String email, String code) {
+        // One message for "no such account", "wrong code", and "expired code" alike -- same
+        // enumeration/brute-force reasoning as verifyCode()'s identical choice.
+        String invalidMessage = "Invalid or expired code.";
+
+        User user = userRepository.findByEmail(email.toLowerCase())
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, invalidMessage));
+
+        if (user.getLoginCode() == null || !user.getLoginCode().equals(code)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, invalidMessage);
+        }
+
+        if (user.getLoginCodeExpiresAt() == null || user.getLoginCodeExpiresAt().isBefore(Instant.now())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Code expired. Request a new one.");
+        }
+
+        // Single-use: clear it immediately so the same code can't sign in twice, and so a code
+        // leaked after use (forwarded email, shared inbox) is already dead.
+        user.setLoginCode(null);
+        user.setLoginCodeExpiresAt(null);
+        userRepository.save(user);
+
+        String token = jwtService.generateToken(user.getId(), user.getEmail());
+        return new AuthResponse(token, toDto(user));
     }
 
     @Transactional(readOnly = true)

@@ -1,5 +1,6 @@
 package com.codepilot.service;
 
+import com.codepilot.dto.auth.AuthResponse;
 import com.codepilot.dto.auth.RegisterRequest;
 import com.codepilot.dto.auth.RegisterResponse;
 import com.codepilot.dto.auth.MessageResponse;
@@ -57,6 +58,8 @@ class AuthServiceTest {
         authService = new AuthService(userRepository, passwordEncoder, jwtService, authenticationManager, emailService);
         ReflectionTestUtils.setField(authService, "verificationTokenExpirationMs", 86_400_000L);
         ReflectionTestUtils.setField(authService, "resetTokenExpirationMs", 3_600_000L);
+        ReflectionTestUtils.setField(authService, "loginCodeExpirationMs", 600_000L);
+        when(jwtService.generateToken(any(), anyString())).thenReturn("jwt-token");
 
         when(passwordEncoder.encode(anyString())).thenReturn("hashed");
         when(userRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -249,5 +252,98 @@ class AuthServiceTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("expired");
         assertThat(user.getPasswordHash()).isEqualTo("old-hash");
+    }
+
+    @Test
+    void requestLoginCodeSendsCodeAndGenericMessageForVerifiedAccount() {
+        User user = User.builder().id(UUID.randomUUID()).email("liam@example.com")
+                .emailVerified(true).build();
+        when(userRepository.findByEmail("liam@example.com")).thenReturn(Optional.of(user));
+
+        MessageResponse response = authService.requestLoginCode("liam@example.com");
+
+        assertThat(response.message()).isEqualTo(
+                "If that account exists and is verified, we've sent a sign-in code.");
+        assertThat(user.getLoginCode()).matches("\\d{6}");
+        assertThat(user.getLoginCodeExpiresAt()).isAfter(Instant.now());
+        verify(emailService).sendLoginCodeEmail(eq("liam@example.com"), anyString());
+    }
+
+    @Test
+    void requestLoginCodeSendsNothingForUnverifiedAccountButKeepsTheSameMessage() {
+        // Passwordless login is an alternative to password login, not a way around the signup
+        // email-verification step -- an unverified account must not be able to sign in via
+        // either path. The response text still can't change, or it would leak "this account
+        // exists but isn't verified" to a prober.
+        User user = User.builder().id(UUID.randomUUID()).email("maya@example.com")
+                .emailVerified(false).build();
+        when(userRepository.findByEmail("maya@example.com")).thenReturn(Optional.of(user));
+
+        MessageResponse response = authService.requestLoginCode("maya@example.com");
+
+        assertThat(response.message()).isEqualTo(
+                "If that account exists and is verified, we've sent a sign-in code.");
+        assertThat(user.getLoginCode()).isNull();
+        verify(emailService, never()).sendLoginCodeEmail(any(), any());
+    }
+
+    @Test
+    void requestLoginCodeReturnsSameGenericMessageAndSendsNothingForUnknownEmail() {
+        when(userRepository.findByEmail("ghost3@example.com")).thenReturn(Optional.empty());
+
+        MessageResponse response = authService.requestLoginCode("ghost3@example.com");
+
+        assertThat(response.message()).isEqualTo(
+                "If that account exists and is verified, we've sent a sign-in code.");
+        verify(emailService, never()).sendLoginCodeEmail(any(), any());
+    }
+
+    @Test
+    void verifyLoginCodeSucceedsWithMatchingUnexpiredCodeAndReturnsARealSession() {
+        User user = User.builder().id(UUID.randomUUID()).email("noah@example.com")
+                .emailVerified(true).loginCode("482913")
+                .loginCodeExpiresAt(Instant.now().plus(1, ChronoUnit.HOURS)).build();
+        when(userRepository.findByEmail("noah@example.com")).thenReturn(Optional.of(user));
+
+        AuthResponse response = authService.verifyLoginCode("noah@example.com", "482913");
+
+        assertThat(response.token()).isEqualTo("jwt-token");
+        assertThat(response.user().email()).isEqualTo("noah@example.com");
+        // Single-use: the code must not still work a second time.
+        assertThat(user.getLoginCode()).isNull();
+        assertThat(user.getLoginCodeExpiresAt()).isNull();
+    }
+
+    @Test
+    void verifyLoginCodeRejectsWrongCodeWithGenericMessage() {
+        User user = User.builder().id(UUID.randomUUID()).email("olivia@example.com")
+                .emailVerified(true).loginCode("482913")
+                .loginCodeExpiresAt(Instant.now().plus(1, ChronoUnit.HOURS)).build();
+        when(userRepository.findByEmail("olivia@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.verifyLoginCode("olivia@example.com", "000000"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid or expired code.");
+    }
+
+    @Test
+    void verifyLoginCodeRejectsUnknownEmailWithSameGenericMessage() {
+        when(userRepository.findByEmail("ghost4@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.verifyLoginCode("ghost4@example.com", "123456"))
+                .isInstanceOf(ApiException.class)
+                .hasMessage("Invalid or expired code.");
+    }
+
+    @Test
+    void verifyLoginCodeRejectsExpiredCodeWithDistinctMessage() {
+        User user = User.builder().id(UUID.randomUUID()).email("peter@example.com")
+                .emailVerified(true).loginCode("482913")
+                .loginCodeExpiresAt(Instant.now().minus(1, ChronoUnit.HOURS)).build();
+        when(userRepository.findByEmail("peter@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.verifyLoginCode("peter@example.com", "482913"))
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("expired");
     }
 }

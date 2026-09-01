@@ -121,6 +121,10 @@ app:
     # an immediate password change, so a narrower blast radius if a reset email sits unread in an
     # inbox that later gets compromised. 1 hour by default.
     token-expiration-ms: ${PASSWORD_RESET_TOKEN_EXPIRATION_MS:3600000}
+  login-otp:
+    # Shorter still (10 min by default) -- unlike the two windows above, this code stands in for
+    # a password on every sign-in, not just once during signup/recovery.
+    token-expiration-ms: ${LOGIN_OTP_TOKEN_EXPIRATION_MS:600000}
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
     ai:
@@ -141,6 +145,12 @@ app:
     forgot-password:
       limit: ${RATE_LIMIT_FORGOT_PASSWORD_LIMIT:5}
       window-seconds: ${RATE_LIMIT_FORGOT_PASSWORD_WINDOW_SECONDS:3600}
+    login-otp-request:
+      limit: ${RATE_LIMIT_LOGIN_OTP_REQUEST_LIMIT:5}
+      window-seconds: ${RATE_LIMIT_LOGIN_OTP_REQUEST_WINDOW_SECONDS:3600}
+    login-otp-verify:
+      limit: ${RATE_LIMIT_LOGIN_OTP_VERIFY_LIMIT:10}
+      window-seconds: ${RATE_LIMIT_LOGIN_OTP_VERIFY_WINDOW_SECONDS:900}
 
 logging:
   level:

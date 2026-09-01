@@ -152,6 +152,13 @@ export default function LoginPage() {
             {isSubmitting ? 'Signing in…' : 'Sign in'}
           </button>
 
+          <Link
+            to="/login-with-code"
+            className="block text-center text-xs font-medium text-brand-400 hover:text-brand-300"
+          >
+            Or sign in with a one-time code instead
+          </Link>
+
           <div className="flex items-center gap-3 text-xs text-slate-600">
             <div className="h-px flex-1 bg-slate-800" />
             or

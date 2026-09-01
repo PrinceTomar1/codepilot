@@ -2,6 +2,7 @@ package com.codepilot.controller;
 
 import com.codepilot.dto.auth.AuthResponse;
 import com.codepilot.dto.auth.ForgotPasswordRequest;
+import com.codepilot.dto.auth.LoginCodeRequest;
 import com.codepilot.dto.auth.LoginRequest;
 import com.codepilot.dto.auth.MessageResponse;
 import com.codepilot.dto.auth.RegisterRequest;
@@ -82,6 +83,18 @@ public class AuthController {
     @PostMapping("/reset-password")
     public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         return ResponseEntity.ok(authService.resetPassword(request.token(), request.newPassword()));
+    }
+
+    @PostMapping("/login-otp/request")
+    public ResponseEntity<MessageResponse> requestLoginCode(@Valid @RequestBody LoginCodeRequest request) {
+        return ResponseEntity.ok(authService.requestLoginCode(request.email()));
+    }
+
+    // Reuses VerifyCodeRequest (email + 6-digit code) -- identical shape and validation to the
+    // email-verification code, just a different endpoint/meaning for what the code grants.
+    @PostMapping("/login-otp/verify")
+    public ResponseEntity<AuthResponse> verifyLoginCode(@Valid @RequestBody VerifyCodeRequest request) {
+        return ResponseEntity.ok(authService.verifyLoginCode(request.email(), request.code()));
     }
 
     @GetMapping("/me")

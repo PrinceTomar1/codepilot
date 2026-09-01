@@ -49,6 +49,12 @@ public class User {
     @Column(name = "reset_token_expires_at")
     private Instant resetTokenExpiresAt;
 
+    @Column(name = "login_code")
+    private String loginCode;
+
+    @Column(name = "login_code_expires_at")
+    private Instant loginCodeExpiresAt;
+
     @Column(name = "github_id", unique = true)
     private Long githubId;
 

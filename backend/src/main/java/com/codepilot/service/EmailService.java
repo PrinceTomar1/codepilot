@@ -81,6 +81,22 @@ public class EmailService {
         return send(toEmail, subject, html);
     }
 
+    /**
+     * @return same contract as {@link #sendVerificationEmail} -- true on hand-off success, logged
+     * either way. requestLoginCode() always returns its own generic message regardless of this
+     * result, for the same account-enumeration reason forgotPassword() does.
+     */
+    public boolean sendLoginCodeEmail(String toEmail, String code) {
+        String html = """
+                <p>Use this code to sign in to CodePilot:</p>
+                <p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; font-family: monospace;">%s</p>
+                <p>This code expires in 10 minutes. If you didn't request this, you can safely
+                ignore this email -- no one can sign in without it.</p>
+                """.formatted(code);
+        String subject = "Your CodePilot sign-in code";
+        return send(toEmail, subject, html);
+    }
+
     private boolean send(String toEmail, String subject, String html) {
         if ("sendgrid".equalsIgnoreCase(provider)) {
             return sendViaSendgrid(toEmail, subject, html);

@@ -73,3 +73,21 @@ export async function getCurrentUser(): Promise<User> {
   const { data } = await apiClient.get<User>('/auth/me')
   return data
 }
+
+export async function requestLoginCode(email: string): Promise<MessageResponse> {
+  const { data } = await apiClient.post<MessageResponse>('/auth/login-otp/request', {
+    email,
+  })
+  return data
+}
+
+export async function verifyLoginCode(
+  email: string,
+  code: string,
+): Promise<AuthResponse> {
+  const { data } = await apiClient.post<AuthResponse>('/auth/login-otp/verify', {
+    email,
+    code,
+  })
+  return data
+}

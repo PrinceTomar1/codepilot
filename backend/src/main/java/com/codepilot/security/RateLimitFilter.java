@@ -79,6 +79,22 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Value("${app.rate-limit.forgot-password.window-seconds:3600}")
     private int forgotPasswordWindowSeconds;
 
+    // Same reasoning as forgot-password: an unauthenticated endpoint that emails someone needs
+    // its own guard against becoming a free inbox-spam tool.
+    @Value("${app.rate-limit.login-otp-request.limit:5}")
+    private int loginOtpRequestLimit;
+
+    @Value("${app.rate-limit.login-otp-request.window-seconds:3600}")
+    private int loginOtpRequestWindowSeconds;
+
+    // Same reasoning as verify-code: a 6-digit code is only ~1M possibilities, and this one
+    // grants a live session on success, so it needs at least as tight a brute-force guard.
+    @Value("${app.rate-limit.login-otp-verify.limit:10}")
+    private int loginOtpVerifyLimit;
+
+    @Value("${app.rate-limit.login-otp-verify.window-seconds:900}")
+    private int loginOtpVerifyWindowSeconds;
+
     public RateLimitFilter(RateLimiter rateLimiter, ObjectMapper objectMapper) {
         this.rateLimiter = rateLimiter;
         this.objectMapper = objectMapper;
@@ -108,6 +124,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
         if ("POST".equals(method) && "/api/auth/forgot-password".equals(path)) {
             return new Bucket("forgot-password", forgotPasswordLimit, Duration.ofSeconds(forgotPasswordWindowSeconds));
+        }
+        if ("POST".equals(method) && "/api/auth/login-otp/request".equals(path)) {
+            return new Bucket("login-otp-request", loginOtpRequestLimit, Duration.ofSeconds(loginOtpRequestWindowSeconds));
+        }
+        if ("POST".equals(method) && "/api/auth/login-otp/verify".equals(path)) {
+            return new Bucket("login-otp-verify", loginOtpVerifyLimit, Duration.ofSeconds(loginOtpVerifyWindowSeconds));
         }
         return null;
     }
