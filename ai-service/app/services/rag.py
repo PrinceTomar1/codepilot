@@ -367,6 +367,27 @@ def build_query_prompt(question: str, chunks: list[RetrievedChunk], history: lis
     )
 
 
+def _fallback_answer_from_chunks(chunks: list[RetrievedChunk]) -> str:
+    """A deterministic, no-LLM-call answer: just presents the retrieved chunks directly. Used
+    only as the last resort in answer_question() when both the main pass and the corrective retry
+    wrongly refused an already-confirmed in-scope, non-empty-context question -- see the call
+    site. Grouped by file (a chunk-per-bullet list reads worse than a per-file summary when
+    several chunks come from the same file, which is common for a focused question)."""
+    by_file: dict[str, list[RetrievedChunk]] = {}
+    for c in chunks:
+        by_file.setdefault(c.file_path, []).append(c)
+
+    lines = [
+        "I wasn't able to put together a full written explanation, but here's the code this "
+        "question matched most closely:",
+        "",
+    ]
+    for file_path, file_chunks in by_file.items():
+        ranges = ", ".join(f"{c.start_line}-{c.end_line}" for c in file_chunks)
+        lines.append(f"- **{file_path}** (lines {ranges})")
+    return "\n".join(lines)
+
+
 async def answer_question(
     llm: LLMClient, question: str, chunks: list[RetrievedChunk], history: list[QaTurn] | None = None
 ) -> tuple[str, list[Citation]]:
@@ -448,7 +469,15 @@ async def answer_question(
             fast=True,
         )
         if NO_CONTEXT_ANSWER.lower() in retry_answer.lower():
-            return NO_CONTEXT_ANSWER, []
+            # Live testing showed the retry above, while it resolves most cases, is still a
+            # second roll of the same non-deterministic dice -- it can refuse twice in a row on a
+            # stubborn phrasing ("line by line" reproduced this exact sequence). At this point
+            # in-scope and non-empty-context are already CONFIRMED, not guessed, so showing the
+            # user a dead-end refusal would be actively wrong, not just unhelpful. Fall back to a
+            # deterministic, non-LLM answer built directly from the chunks themselves -- it can't
+            # refuse because no model call is involved, and it's still fully grounded (every line
+            # comes from a real retrieved chunk with a real citation).
+            return _fallback_answer_from_chunks(chunks), citations
         answer = retry_answer
 
     # A general-knowledge answer (question unrelated to the repo) isn't grounded in the retrieved

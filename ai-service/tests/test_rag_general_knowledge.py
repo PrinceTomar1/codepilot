@@ -13,7 +13,12 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from app.services.rag import GENERAL_KNOWLEDGE_MARKER, NO_CONTEXT_ANSWER, answer_question
+from app.services.rag import (
+    GENERAL_KNOWLEDGE_MARKER,
+    NO_CONTEXT_ANSWER,
+    _fallback_answer_from_chunks,
+    answer_question,
+)
 from app.services.vector_store import RetrievedChunk
 
 CHUNK = RetrievedChunk(
@@ -101,19 +106,25 @@ async def test_falls_back_to_a_real_general_knowledge_answer_when_the_first_pass
     assert llm.complete.call_count == 3
 
 
-async def test_keeps_the_refusal_when_the_fallback_classifier_agrees_its_in_scope_and_the_retry_also_refuses():
-    # A genuinely ungrounded but IN-SCOPE question (about the code, just not covered by what's
-    # indexed) must still refuse -- the fallback is only for wrongly-refused off-topic questions,
-    # and the retry (see the next test) is only for wrongly-refused in-scope-with-context ones.
-    # Only give up once *both* the off-topic check and the corrective retry have failed to
-    # produce anything else.
+async def test_falls_back_to_a_chunk_listing_when_both_the_main_pass_and_the_retry_refuse():
+    # Real bug, reproduced live: the corrective retry (next test) resolves most wrong refusals,
+    # but it's still a second roll of the same non-deterministic dice -- on a stubborn phrasing
+    # ("explain me the code line by line") it refused TWICE in a row in production, even though
+    # in-scope and non-empty-context were already confirmed by this point. Showing the user a
+    # dead-end refusal at that point would be actively wrong, not just unhelpful -- so the final
+    # fallback is deterministic and doesn't call the model at all, which means it structurally
+    # cannot refuse.
     llm = AsyncMock()
     llm.complete.side_effect = [NO_CONTEXT_ANSWER, "INSCOPE", NO_CONTEXT_ANSWER]
 
     answer, citations = await answer_question(llm, "how does the payment webhook retry logic work", [CHUNK])
 
-    assert answer == NO_CONTEXT_ANSWER
-    assert citations == []
+    assert answer != NO_CONTEXT_ANSWER
+    assert "weather_app.py" in answer
+    # Still genuinely grounded (every line in the fallback answer comes from a real retrieved
+    # chunk), so unlike the true refusal case, citations ARE attached here.
+    assert len(citations) == 1
+    assert citations[0].file_path == "weather_app.py"
     assert llm.complete.call_count == 3
 
 
@@ -146,14 +157,32 @@ async def test_retries_once_and_uses_the_real_answer_when_the_first_pass_wrongly
     assert "having no basis to answer" in retry_call.kwargs["system"]
 
 
-async def test_fallback_classifier_failure_keeps_the_original_refusal_rather_than_crashing():
+async def test_fallback_classifier_failure_does_not_crash_and_still_reaches_the_chunk_listing():
     llm = AsyncMock()
     llm.complete.side_effect = [NO_CONTEXT_ANSWER, RuntimeError("provider unreachable"), NO_CONTEXT_ANSWER]
 
     answer, citations = await answer_question(llm, "some ungrounded question", [CHUNK])
 
-    assert answer == NO_CONTEXT_ANSWER
-    assert citations == []
+    assert answer != NO_CONTEXT_ANSWER
+    assert "weather_app.py" in answer
+    assert len(citations) == 1
+
+
+def test_fallback_answer_groups_multiple_chunks_from_the_same_file_into_one_bullet():
+    chunks = [
+        RetrievedChunk(file_path="src/app.py", language="python", start_line=1, end_line=10,
+                        content="a", distance=0.1),
+        RetrievedChunk(file_path="src/app.py", language="python", start_line=40, end_line=55,
+                        content="b", distance=0.2),
+        RetrievedChunk(file_path="src/utils.py", language="python", start_line=5, end_line=8,
+                        content="c", distance=0.3),
+    ]
+
+    answer = _fallback_answer_from_chunks(chunks)
+
+    assert answer.count("src/app.py") == 1
+    assert "1-10" in answer and "40-55" in answer
+    assert "src/utils.py" in answer
 
 
 async def test_normal_grounded_answer_still_gets_real_citations():
