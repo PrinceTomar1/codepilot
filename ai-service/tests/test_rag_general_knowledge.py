@@ -81,7 +81,7 @@ async def test_query_requests_fast_mode_to_cut_thinking_latency():
 
 
 async def test_falls_back_to_a_real_general_knowledge_answer_when_the_first_pass_wrongly_refuses():
-    # Real bug, confirmed live: "give me some details on nepal" got the flat refusal even though
+    # Real bug: "give me some details on nepal" got the flat refusal even though
     # QUERY_SYSTEM_PROMPT already instructs the model to use general knowledge for off-topic
     # questions -- a smaller model doesn't reliably self-classify this within one big multi-rule
     # prompt. The fix asks again with a simpler, single-purpose classifier before trusting a

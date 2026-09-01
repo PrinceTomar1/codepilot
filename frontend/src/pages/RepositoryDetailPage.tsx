@@ -174,8 +174,8 @@ export default function RepositoryDetailPage() {
  * text, not something to show verbatim to a non-technical user. This translates the couple of
  * causes actually seen in practice into a plain-English explanation with an accurate next step;
  * anything unrecognized still shows the real message (truncated) rather than a generic guess that
- * might be flatly wrong for that specific failure -- confirmed live: a repository the size of
- * torvalds/linux failed with a buffer-size error that had nothing to do with the access token, but
+ * might be flatly wrong for that specific failure: a repository the size of torvalds/linux failed
+ * with a buffer-size error that had nothing to do with the access token, but
  * the UI told everyone to "double-check the token" regardless of the actual cause.
  */
 function explainIndexError(raw: string | null): string {

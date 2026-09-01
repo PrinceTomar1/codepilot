@@ -65,8 +65,8 @@ public class GitHubClient {
             // Machine-generated dependency lockfiles: huge, offer nothing for understanding a
             // codebase, and actively hurt keyword search -- a package name that happens to
             // substring-match a real keyword (e.g. "micromark-util-symbol" matching "symbol") can
-            // outnumber every genuinely relevant chunk in the repo. Confirmed live: this was a
-            // real contributor to a retrieval failure on the query "gold symbol".
+            // outnumber every genuinely relevant chunk in the repo -- a real contributor to a
+            // retrieval failure on the query "gold symbol".
             "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "npm-shrinkwrap.json",
             "composer.lock", "gemfile.lock", "cargo.lock", "poetry.lock", "pipfile.lock",
             "go.sum", "mix.lock"

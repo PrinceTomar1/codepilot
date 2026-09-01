@@ -226,7 +226,7 @@ class VectorStore:
         different rarity (e.g. "gold symbol" against a repo where "gold" appears in 2 chunks and
         "symbol" appears in dozens, several of them just dependency-lockfile noise like
         "micromark-util-symbol") let the common word's sheer number of matches bury the rare,
-        actually-relevant one before it ever reached the LIMIT -- confirmed live. Each keyword's
+        actually-relevant one before it ever reached the LIMIT. Each keyword's
         weight is additionally scaled by how many chunks in THIS repo it matches at all (a simple
         inverse-document-frequency): a keyword matching only 2 chunks counts far more per-match
         than one matching 40, the same way a real search engine treats a rare term as more

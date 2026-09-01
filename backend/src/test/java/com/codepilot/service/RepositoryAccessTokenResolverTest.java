@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
  * Real bug: CodeRepository#accessTokenEncrypted is a one-time copy of the owner's GitHub OAuth
  * token, taken when the repo was connected -- it was never updated again, so re-authenticating
  * with GitHub silently broke every already-connected repo with a 401 on the next indexing/review
- * run. Confirmed live against two real repos before this fix. These tests lock in the resolution
+ * run, reproduced against two real repos before this fix. These tests lock in the resolution
  * order: the owner's CURRENT token wins whenever one exists, and only a repo with no owner token
  * on file (a manually pasted PAT, never a copy of anything) falls back to its own stored value.
  */

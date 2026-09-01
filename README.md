@@ -211,9 +211,9 @@ question types, standalone code search, a full PR review across all four agents,
 generation, Redis-down graceful degradation, the fully-local Ollama LLM path, and a full
 `docker compose up --build` boot of all six services.
 
-All of the above has additionally been re-verified live in production (not just locally): a real
-registration receiving a real email, a real GitHub PR reviewed end-to-end with a real categorized
-report, a real repository indexed and queried through the deployed chatbot.
+Production has been exercised the same way: registration with real email delivery, a full GitHub
+PR review producing a categorized report, and a repository indexed and queried through the
+deployed chatbot.
 
 ## Deployment
 

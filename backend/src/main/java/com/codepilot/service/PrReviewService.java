@@ -53,7 +53,7 @@ public class PrReviewService {
     // ObjectProvider (not a plain @Lazy self field) is what makes that actually work: Lombok's
     // @RequiredArgsConstructor doesn't copy field-level annotations onto the generated constructor
     // parameter, so a @Lazy PrReviewService field still resolves eagerly at construction time and
-    // fails with "bean currently in creation" -- confirmed live, the app wouldn't even start.
+    // fails with "bean currently in creation" -- the app wouldn't even start.
     // ObjectProvider<T> is itself trivially constructible (it's a lookup handle, not the bean), so
     // it sidesteps the circularity entirely and only resolves the real proxy when .getObject() is
     // actually called, by which point the context is fully initialized.

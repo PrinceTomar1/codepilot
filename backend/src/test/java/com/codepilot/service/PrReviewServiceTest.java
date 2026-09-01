@@ -183,8 +183,8 @@ class PrReviewServiceTest {
         // The real bug this guards: reviewAsync() must be called through the injected self proxy,
         // not as a bare/this-qualified call -- a bare call bypasses Spring's @Async proxy entirely
         // (self-invocation), so the review would run SYNCHRONOUSLY inside the HTTP request thread
-        // instead of in the background. Confirmed live before this fix: a real trigger request
-        // blocked for the full duration of the AI review instead of returning immediately.
+        // instead of in the background. Before this fix, a real trigger request blocked for the
+        // full duration of the AI review instead of returning immediately.
         verify(selfProxy).reviewAsync(pullRequestId);
     }
 

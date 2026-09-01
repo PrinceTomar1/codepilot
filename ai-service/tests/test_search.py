@@ -72,7 +72,7 @@ def test_result_order_matches_merged_order():
 
 
 def test_request_accepts_an_explicit_null_top_k_not_just_an_omitted_one():
-    # Real bug found live: the Java backend's AiSearchRequest record serializes an absent topK as
+    # Real bug: the Java backend's AiSearchRequest record serializes an absent topK as
     # a literal "topK": null, not an omitted JSON key -- a plain `int` field with a default only
     # honors that default when the key is OMITTED, so an explicit null was rejected with a 422
     # ("Input should be a valid integer") even though the caller's intent was "use the default".

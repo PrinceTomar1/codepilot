@@ -79,7 +79,7 @@ class SearchRequest(CamelModel):
     # Optional (not just defaulted): a Pydantic default only applies when the field is OMITTED
     # from the JSON body, not when it's present but explicitly null -- and the Java backend's
     # AiSearchRequest record serializes an absent topK as a literal "topK": null, not an omitted
-    # key. A plain `int` field rejects that null outright; confirmed live as a real 422.
+    # key. A plain `int` field rejects that null outright, as a real 422.
     top_k: int | None = Field(default=None, alias="topK")
 
 

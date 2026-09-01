@@ -31,7 +31,7 @@ GENERAL_KNOWLEDGE_MARKER = "[General knowledge, not from this repository's code]
 
 # QUERY_SYSTEM_PROMPT tells the model to treat chitchat (greetings, thanks, goodbyes) as not
 # needing the "not enough information" refusal -- and gives "thanks" as a literal example word.
-# Confirmed live this wasn't reliable: a smaller local (Ollama) model correctly recognized "hi"/
+# In practice this wasn't reliable: a smaller local (Ollama) model correctly recognized "hi"/
 # "hello" as chitchat, but still refused "thanks", "okay thanks", and "ok cool" with the strict
 # no-context answer, even with "thanks" spelled out in the prompt. Model instruction-following for
 # this is provider-dependent (larger cloud models handled it fine); detecting it in code instead
@@ -113,7 +113,7 @@ _STOPWORDS = frozenset({
 _FILENAME_RE = re.compile(r"\b[\w-]+\.[a-zA-Z]\w{1,5}\b")
 _IDENTIFIER_RE = re.compile(r"\b(?:[A-Z][a-z0-9]+){2,}\b|\b[a-z0-9]+(?:_[a-z0-9]+)+\b|\b[a-z]+[A-Z]\w*\b")
 # Every pattern above requires a LEADING LETTER, so a digit-first identifier is invisible to all
-# three -- real bug, confirmed live: "explain the approach used in 4SUM" extracted only
+# three -- real bug: "explain the approach used in 4SUM" extracted only
 # ["approach", "used"], completely missing "4SUM" itself, on a repo whose actual file is
 # `4sum.cpp`. This is a common naming convention specifically in DSA/LeetCode-style repos ("2Sum",
 # "3Sum", "4Sum", "132Pattern", "01Matrix"...), not an edge case. Requires at least one letter
@@ -150,7 +150,7 @@ def extract_keywords(question: str) -> list[str]:
 
 
 # A regex over the general SHAPE of a broad question, not an enumerated list of exact phrases.
-# Real bug found live twice: "explain the code" was added as an exact marker, then the very next
+# Real bug, hit twice: "explain the code" was added as an exact marker, then the very next
 # report was "explain code" (no article) -- a different phrasing of the identical request that an
 # exact-phrase list can never keep up with. `.{0,30}` lets a few words sit between the verb and
 # its object ("explain the whole project", "walk me quickly through the code") without turning
@@ -228,7 +228,7 @@ def build_search_results(
 # Reuses the same "what's a good starting point" heuristic as onboarding.py's entry-point
 # prioritization, applied here to rescue broad questions from a real retrieval failure mode.
 # Includes Next.js App Router conventions (page/layout/route) alongside the older
-# main/app/index style -- a real gap found live: a Next.js repo's actual application files
+# main/app/index style -- a real gap: a Next.js repo's actual application files
 # (app/[lang]/(home)/page.tsx, app/[lang]/layout.tsx) matched none of the original hint words,
 # so the fallback picked up nothing but nested sub-projects' READMEs and a bare top-level README.
 _ENTRY_POINT_HINTS = re.compile(
@@ -402,7 +402,7 @@ async def answer_question(
     if NO_CONTEXT_ANSWER.lower() in answer.lower():
         # QUERY_SYSTEM_PROMPT already instructs the model to use general knowledge instead of
         # refusing for clearly off-topic questions ("what's the capital of France" etc.) -- but
-        # confirmed live, that single mega-prompt (grounded-answer rules + chitchat carve-out +
+        # in practice, that single mega-prompt (grounded-answer rules + chitchat carve-out +
         # subjective-opinion carve-out + general-knowledge carve-out, all at once) isn't reliably
         # followed by a smaller model: "give me some details on nepal" got the flat refusal
         # instead of a real answer. Before trusting the refusal, ask again with a much simpler,

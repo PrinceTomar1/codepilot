@@ -102,7 +102,7 @@ def test_duplicate_imports_produce_a_single_edge():
 
 
 def test_at_slash_path_alias_resolves_via_default_convention_without_tsconfig():
-    # Real bug found live: an 87-file repo produced only 13 edges because every "@/..." import
+    # Real bug: an 87-file repo produced only 13 edges because every "@/..." import
     # (the standard Vite/Next/CRA alias for src/) was silently treated as external and dropped.
     files = [
         ("src/components/ui/button.tsx", "typescript", "export const Button = () => null\n"),

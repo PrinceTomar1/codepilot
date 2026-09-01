@@ -23,11 +23,11 @@ def _chunk(path: str, start: int, end: int, distance: float, symbol: str | None 
 
 
 def test_extract_keywords_finds_digit_led_identifiers():
-    # Real bug found live: every existing pattern requires a LEADING LETTER, so a question like
+    # Real bug: every existing pattern requires a LEADING LETTER, so a question like
     # "explain the approach used in 4SUM" extracted only ["approach", "used"] -- completely
     # missing "4SUM" itself -- on a repo whose actual file is `4sum.cpp`. This naming convention
     # (2Sum, 3Sum, 4Sum, 132Pattern...) is common specifically in DSA/LeetCode-style repos, not a
-    # contrived edge case. Confirmed live: retrieval never surfaced 4sum.cpp until this was fixed.
+    # contrived edge case -- retrieval never surfaced 4sum.cpp until this was fixed.
     keywords = extract_keywords("explain the approach he has used in 4SUM")
     assert "4SUM" in keywords
 
@@ -142,14 +142,14 @@ def test_merge_handles_empty_inputs():
 
 
 def test_adaptive_top_k_recognizes_explain_the_code_as_broad():
-    # Real bug found live: "explain the code" wasn't in the broad-question marker set even though
+    # Real bug: "explain the code" wasn't in the broad-question marker set even though
     # it's semantically identical to "explain the project"/"explain the repo", which already were.
     assert adaptive_top_k("explain the code", 8) == 15
     assert adaptive_top_k("can you explain the codebase to me", 8) == 15
 
 
 def test_adaptive_top_k_recognizes_the_general_broad_question_shape_not_just_exact_phrases():
-    # Real bug found live TWICE: the first fix added "explain the code" as an exact marker, then
+    # Real bug, hit twice: the first fix added "explain the code" as an exact marker, then
     # the very next report was "explain code" (no article) -- a different phrasing of the
     # identical request that a hardcoded phrase list can never fully enumerate. Replaced with a
     # regex over the general verb+object SHAPE of a broad question instead of a growing list.

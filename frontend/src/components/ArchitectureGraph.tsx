@@ -60,7 +60,7 @@ export function layoutNodes(nodeIds: string[]): Map<string, { x: number; y: numb
 
 /** Splits a node's edges by direction relative to it -- which files it imports, and which files
  * import it. Returns empty arrays when nothing is active. Exported for direct unit testing, same
- * reasoning as layoutNodes above: real bug found live was that highlighting a node's edges on the
+ * reasoning as layoutNodes above: the real problem was that highlighting a node's edges on the
  * canvas isn't enough on its own -- the connected node is very often scrolled off-screen in a
  * dense, multi-column graph, so the highlighted line visually goes nowhere as far as the user can
  * tell. A plain-text list of the actual connected file names is needed regardless of where they
@@ -142,7 +142,7 @@ function ArchitectureCanvas({
 }) {
   const { fitView } = useReactFlow()
 
-  // Real bug found live: highlighting a node's edges isn't enough on its own -- in a dense,
+  // Real bug: highlighting a node's edges isn't enough on its own -- in a dense,
   // multi-column graph the connected node is very often scrolled off-screen, so the highlighted
   // line visually points at nothing the user can see. Reframe the camera to the active node's
   // whole neighborhood (or back out to the full graph once nothing is selected).

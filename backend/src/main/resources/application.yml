@@ -79,7 +79,7 @@ management:
     # point of caching/rate-limiting being backed by a fast, non-durable store. The default
     # RedisHealthIndicator disagreed: it dragged the AGGREGATE /actuator/health status to DOWN
     # the instant Redis blipped, even though every real endpoint kept returning 200s the whole
-    # time (confirmed live: repository list/detail both stayed 200 with Redis stopped). Since
+    # time (repository list/detail both stayed 200 with Redis stopped in testing). Since
     # docker-compose's healthcheck (and any real orchestrator's) gates container restarts and
     # traffic routing on this endpoint, a transient Redis hiccup would otherwise take the whole
     # backend out of rotation for no functional reason.

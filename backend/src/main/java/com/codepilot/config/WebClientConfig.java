@@ -20,7 +20,7 @@ public class WebClientConfig {
 
     // PR review runs 4 agents concurrently plus a summarizer -- real-world LLM latency variance
     // means one of those five calls regularly exceeds 60s even though the other four return in a
-    // few seconds (confirmed live: 3-4 back within 3s, one taking 30s+). The 60s shared timeout
+    // few seconds (typically 3-4 back within 3s, one taking 30s+). The 60s shared timeout
     // was cutting the whole review off mid-flight, and since ai-service has no way to resume a
     // request the caller already gave up on, every retry just restarted the same slow work from
     // scratch -- it could never actually finish. Review is already invoked via @Async
@@ -98,7 +98,7 @@ public class WebClientConfig {
                 .baseUrl("https://api.github.com")
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 // A large repository's recursive file tree is one single JSON response with one
-                // entry per file -- 16MB was enough for most repos but not, confirmed live, for
+                // entry per file -- 16MB was enough for most repos but not for
                 // something the size of torvalds/linux (~80k files). This still isn't unbounded:
                 // a repository whose tree alone exceeds 64MB of JSON is treated as genuinely too
                 // large (see GitHubClient.fetchRepositoryTree's error handling below), rather than

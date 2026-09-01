@@ -107,9 +107,9 @@ class GitHubClientTest {
         // Real bug: a huge, machine-generated lockfile has no value for understanding a codebase,
         // but its package names can substring-match a real keyword by accident (e.g.
         // "micromark-util-symbol" matching a search for "symbol") -- enough such incidental
-        // matches can outrank and bury genuinely relevant chunks in keyword search. Confirmed live
-        // against a real repository: the query "gold symbol" never surfaced the two chunks that
-        // actually mention "gold" because pnpm-lock.yaml alone contributed several higher-scoring
+        // matches can outrank and bury genuinely relevant chunks in keyword search. Against a real
+        // repository, the query "gold symbol" never surfaced the two chunks that actually mention
+        // "gold" because pnpm-lock.yaml alone contributed several higher-scoring
         // "symbol" matches ahead of them.
         GitHubClient client = startServerWithFiles(Map.of(
                 "package-lock.json", "{\"packages\":{}}",
@@ -128,12 +128,12 @@ class GitHubClientTest {
 
     @Test
     void pullRequestFilesNeverCarryNullPatchOrContent() throws Exception {
-        // Real bug, found live: a removed file and a binary file (GitHub omits "patch" entirely
+        // Real bug: a removed file and a binary file (GitHub omits "patch" entirely
         // for binary diffs) both used to produce a null field here, which crashed the entire PR
         // review with a 422 from ai-service the moment such a file appeared in a real PR --
         // ai-service's schema requires plain (non-optional) strings, and a null explicitly present
         // in the JSON fails that validation even though an *omitted* field would have defaulted
-        // to "". Confirmed live against a real GitHub PR after this fix: review completed clean.
+        // to "". Verified against a real GitHub PR after this fix: review completed clean.
         server = HttpServer.create(new InetSocketAddress(0), 0);
 
         String filesJson = "["

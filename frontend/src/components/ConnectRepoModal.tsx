@@ -185,8 +185,8 @@ export default function ConnectRepoModal({
             {/* Always reachable, regardless of whether "my repos" loaded, errored, or came back
                 empty -- this used to live inside `{availableRepos.data && (...)}`, so a failed
                 picker fetch (e.g. a stale GitHub token) hid the one way to connect ANY other
-                repo, not just the ones affected by that failure. Confirmed live: a user whose
-                account-level GitHub token had gone stale saw only their own known repos, with
+                repo, not just the ones affected by that failure -- a user whose account-level
+                GitHub token had gone stale would otherwise see only their own known repos, with
                 no path to add someone else's, because the picker request was erroring. */}
             <div className="mt-1 flex items-center justify-between gap-2">
               <button

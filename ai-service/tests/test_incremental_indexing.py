@@ -188,7 +188,7 @@ async def test_keyword_search_matches_content_file_path_and_symbol_name(repo_id)
 
 
 async def test_keyword_search_ranks_a_rare_keyword_above_a_common_one_of_similar_length(repo_id):
-    # Real bug, confirmed live: asking "gold symbol" against a real repository never surfaced the
+    # Real bug: asking "gold symbol" against a real repository never surfaced the
     # two chunks that actually mention "gold", because "symbol" (only 2 letters longer) happened
     # to substring-match dozens of unrelated chunks -- several of them just dependency-lockfile
     # noise -- and the old scoring (weight = keyword length only) let that sheer volume of common,

@@ -168,8 +168,8 @@ public class RepositoryService {
         // Only looked up for FAILED repos -- the generic frontend "couldn't index this
         // repository, check the token" message used to show regardless of actual cause,
         // including for real reasons that have nothing to do with the token (a repository too
-        // large to fetch in one API response being a real one, confirmed live against
-        // torvalds/linux). No need to pay for this lookup on the common (non-failed) path.
+        // large to fetch in one API response being a real one (torvalds/linux). No need to pay
+        // for this lookup on the common (non-failed) path.
         String lastIndexError = repo.getStatus() == CodeRepository.RepositoryStatus.FAILED
                 ? indexJobRepository.findFirstByRepositoryIdOrderByStartedAtDesc(repo.getId())
                         .map(job -> job.getError())

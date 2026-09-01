@@ -19,7 +19,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Real bug, found live: ReviewReportDto used to serialize as {githubPrNumber, overallSummary,
+ * Real bug: ReviewReportDto used to serialize as {githubPrNumber, overallSummary,
  * bugs, security, codeSmells, missingTests, performance} -- flat fields with different names
  * than what the frontend has always expected ({prNumber, summary, findings: {bugs, security,
  * ...}}). ReviewList showed a blank PR number/summary for every review, and ReviewDetail hard

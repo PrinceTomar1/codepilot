@@ -1,6 +1,6 @@
 """
 The prompt-level chitchat carve-out (test_rag_chitchat.py) turned out not to be reliable across
-LLM providers: confirmed live, a smaller local (Ollama) model correctly treated "hi"/"hello" as
+LLM providers: a smaller local (Ollama) model correctly treated "hi"/"hello" as
 chitchat per the prompt's instructions, but still returned the strict "not enough information"
 refusal for "thanks", "okay thanks", and "ok cool" -- even though "thanks" is a literal example
 word in that same prompt rule. Rather than continue tuning prompt wording indefinitely, chitchat
