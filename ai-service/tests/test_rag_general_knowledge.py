@@ -201,6 +201,55 @@ async def test_rate_limit_during_refusal_recovery_still_falls_back_gracefully():
     assert len(citations) == 1
 
 
+async def test_rate_limit_with_no_keyword_match_refuses_instead_of_dumping_unrelated_chunks():
+    # Real bug, hit live: "who is ruling india" during a quota outage got the chunk listing
+    # anyway -- vector similarity search always returns its top-K nearest chunks regardless of
+    # whether any of them are actually close, so a non-empty `chunks` list alone doesn't mean the
+    # question is in-scope. With the LLM unavailable to classify it (that's the whole problem),
+    # has_keyword_match is the fallback signal: no literal keyword/identifier from the question
+    # was found anywhere in the codebase, which is a strong sign the question has nothing to do
+    # with it. Showing unrelated code as if it were an answer would be actively misleading here,
+    # worse than the plain refusal.
+    llm = AsyncMock()
+    llm.complete.side_effect = LLMRateLimitedError("quota exceeded")
+
+    answer, citations = await answer_question(
+        llm, "who is ruling india", [CHUNK], has_keyword_match=False,
+    )
+
+    assert answer == NO_CONTEXT_ANSWER
+    assert citations == []
+
+
+async def test_rate_limit_with_a_keyword_match_still_uses_the_chunk_listing():
+    # The other side of the test above: a keyword match is a real, positive signal of relevance,
+    # so the grounded fallback is still the right call when it's present.
+    llm = AsyncMock()
+    llm.complete.side_effect = LLMRateLimitedError("quota exceeded")
+
+    answer, citations = await answer_question(
+        llm, "how does the import work", [CHUNK], has_keyword_match=True,
+    )
+
+    assert answer != NO_CONTEXT_ANSWER
+    assert "weather_app.py" in answer
+    assert len(citations) == 1
+
+
+async def test_rate_limit_during_refusal_recovery_with_no_keyword_match_refuses_too():
+    # Same has_keyword_match reasoning as the main-pass case, but for the second rate-limit catch
+    # point (during the off-topic-check/retry recovery attempt).
+    llm = AsyncMock()
+    llm.complete.side_effect = [NO_CONTEXT_ANSWER, "INSCOPE", LLMRateLimitedError("quota exceeded")]
+
+    answer, citations = await answer_question(
+        llm, "some question", [CHUNK], has_keyword_match=False,
+    )
+
+    assert answer == NO_CONTEXT_ANSWER
+    assert citations == []
+
+
 def test_fallback_answer_groups_multiple_chunks_from_the_same_file_into_one_bullet():
     chunks = [
         RetrievedChunk(file_path="src/app.py", language="python", start_line=1, end_line=10,

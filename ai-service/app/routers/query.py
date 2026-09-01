@@ -87,7 +87,9 @@ async def query_repository(
                 existing_keys.add(key)
 
     try:
-        answer, citations = await answer_question(llm, body.question, chunks, body.history)
+        answer, citations = await answer_question(
+            llm, body.question, chunks, body.history, has_keyword_match=bool(keyword_chunks),
+        )
     except LLMNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except LLMRateLimitedError as exc:

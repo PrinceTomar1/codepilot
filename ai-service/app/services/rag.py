@@ -389,7 +389,8 @@ def _fallback_answer_from_chunks(chunks: list[RetrievedChunk]) -> str:
 
 
 async def answer_question(
-    llm: LLMClient, question: str, chunks: list[RetrievedChunk], history: list[QaTurn] | None = None
+    llm: LLMClient, question: str, chunks: list[RetrievedChunk], history: list[QaTurn] | None = None,
+    has_keyword_match: bool = True,
 ) -> tuple[str, list[Citation]]:
     if is_chitchat(question):
         return chitchat_response(question), []
@@ -437,7 +438,20 @@ async def answer_question(
         # refusal-recovery fallback below. Skip straight to it: no point spending a second and
         # third quota-exhausted call on the off-topic-check/retry dance first, since those would
         # only hit the identical rate limit again.
-        return _fallback_answer_from_chunks(chunks), citations
+        #
+        # Real bug, hit live: "who is ruling india" during a quota outage got the chunk listing
+        # too -- vector similarity search always returns its top-K nearest chunks regardless of
+        # whether any of them are actually close, so "chunks is non-empty" alone doesn't mean
+        # "relevant." With no LLM available to ask (that's the whole problem), has_keyword_match
+        # is the one free, already-computed signal that distinguishes a genuinely in-scope
+        # question (retrieval found the same words/identifiers literally in the codebase) from
+        # one that just happened to retrieve *something* by vector distance -- an off-topic
+        # question about world events has no reason to share vocabulary with source code. Without
+        # a keyword hit, showing unrelated code as if it were a real attempt at an answer is
+        # actively misleading, worse than the plain "not enough information" refusal.
+        if has_keyword_match:
+            return _fallback_answer_from_chunks(chunks), citations
+        return NO_CONTEXT_ANSWER, []
 
     # If the model itself declares insufficient context, don't attach
     # citations that would misleadingly imply grounding was used.
@@ -480,11 +494,14 @@ async def answer_question(
                 fast=True,
             )
         except LLMRateLimitedError:
-            # Same reasoning as the main pass's rate-limit handling above: quota exhaustion mid-
-            # recovery is still not the same as "genuinely no basis to answer" -- fall back to the
-            # deterministic, grounded chunk listing instead of surfacing a raw 429 partway through
-            # what was otherwise a legitimate refusal-recovery attempt.
-            return _fallback_answer_from_chunks(chunks), citations
+            # Same reasoning as the main pass's rate-limit handling above, has_keyword_match
+            # check included: _looks_off_topic() fails closed (treats its own rate-limit error as
+            # "not off-topic" -- see its docstring), so reaching here means we still genuinely
+            # don't know whether this question is in-scope, and unrelated code shouldn't be
+            # presented as an answer to one that isn't.
+            if has_keyword_match:
+                return _fallback_answer_from_chunks(chunks), citations
+            return NO_CONTEXT_ANSWER, []
         if NO_CONTEXT_ANSWER.lower() in retry_answer.lower():
             # Live testing showed the retry above, while it resolves most cases, is still a
             # second roll of the same non-deterministic dice -- it can refuse twice in a row on a
