@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.deps import get_embedding_provider, get_llm_client, get_vector_store
-from app.models.schemas import QueryRequest, QueryResponse
+from app.models.schemas import Citation, QueryRequest, QueryResponse
 from app.services.embeddings import EmbeddingProvider
 from app.services.llm import LLMClient, LLMNotConfiguredError, LLMRateLimitedError
 from app.services.rag import (
     adaptive_top_k,
     answer_question,
+    answer_question_stream,
     extract_keywords,
     merge_retrieved_chunks,
     prioritize_representative_chunks,
@@ -24,13 +28,15 @@ logger = logging.getLogger("codepilot.query")
 router = APIRouter()
 
 
-@router.post("/query", response_model=QueryResponse)
-async def query_repository(
+async def _retrieve_context(
     body: QueryRequest,
-    store: VectorStore = Depends(get_vector_store),
-    embedder: EmbeddingProvider = Depends(get_embedding_provider),
-    llm: LLMClient = Depends(get_llm_client),
-) -> QueryResponse:
+    store: VectorStore,
+    embedder: EmbeddingProvider,
+) -> tuple[list, bool]:
+    """Shared retrieval for /query and /query/stream: embed the question, run hybrid (vector +
+    keyword) search concurrently, merge, and -- for broad questions -- blend in a few
+    representative entry-point/README chunks. Returns (chunks, has_keyword_match). Raises
+    HTTPException for a bad UUID / embedding / DB failure, exactly as before."""
     try:
         repository_id = uuid.UUID(body.repository_id)
     except ValueError:
@@ -86,9 +92,21 @@ async def query_repository(
                 chunks.append(c)
                 existing_keys.add(key)
 
+    return chunks, bool(keyword_chunks)
+
+
+@router.post("/query", response_model=QueryResponse)
+async def query_repository(
+    body: QueryRequest,
+    store: VectorStore = Depends(get_vector_store),
+    embedder: EmbeddingProvider = Depends(get_embedding_provider),
+    llm: LLMClient = Depends(get_llm_client),
+) -> QueryResponse:
+    chunks, has_keyword_match = await _retrieve_context(body, store, embedder)
+
     try:
         answer, citations = await answer_question(
-            llm, body.question, chunks, body.history, has_keyword_match=bool(keyword_chunks),
+            llm, body.question, chunks, body.history, has_keyword_match=has_keyword_match,
         )
     except LLMNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
@@ -96,3 +114,71 @@ async def query_repository(
         raise HTTPException(status_code=429, detail=str(exc))
 
     return QueryResponse(answer=answer, citations=citations, chunksRetrieved=len(chunks))
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.post("/query/stream")
+async def query_repository_stream(
+    body: QueryRequest,
+    store: VectorStore = Depends(get_vector_store),
+    embedder: EmbeddingProvider = Depends(get_embedding_provider),
+    llm: LLMClient = Depends(get_llm_client),
+) -> StreamingResponse:
+    """Server-Sent Events version of /query -- streams the answer as it's generated.
+
+    Frames:
+      event: token  data: {"text": "..."}                         -- incremental answer text
+      event: done   data: {"answer","citations","chunksRetrieved"} -- canonical final payload
+      event: error  data: {"error","status"}                       -- LLM unavailable mid-stream
+
+    The `done` frame always carries the full, authoritative answer + citations (the token frames
+    are purely for progressive rendering), so a consumer can trust `done` even for the cases
+    answer_question() handles specially (refusal-retry, general-knowledge, deterministic
+    fallback)."""
+    if not llm.configured:
+        raise HTTPException(
+            status_code=503,
+            detail=f"LLM not configured: set {'GEMINI_API_KEY' if llm.provider == 'gemini' else 'ANTHROPIC_API_KEY'}",
+        )
+
+    chunks, has_keyword_match = await _retrieve_context(body, store, embedder)
+
+    async def generate() -> AsyncIterator[str]:
+        answer = ""
+        citations: list[Citation] = []
+        try:
+            async for kind, payload in answer_question_stream(
+                llm, body.question, chunks, body.history, has_keyword_match=has_keyword_match,
+            ):
+                if kind == "token":
+                    yield _sse("token", {"text": payload})
+                else:  # "final"
+                    answer, citations = payload
+        except LLMNotConfiguredError as exc:
+            yield _sse("error", {"error": str(exc), "status": 503})
+            return
+        except LLMRateLimitedError as exc:
+            yield _sse("error", {"error": str(exc), "status": 429})
+            return
+        except Exception:
+            logger.exception("Unhandled error during /query/stream")
+            yield _sse("error", {"error": "Internal server error", "status": 500})
+            return
+
+        yield _sse(
+            "done",
+            {
+                "answer": answer,
+                "citations": [c.model_dump(by_alias=True) for c in citations],
+                "chunksRetrieved": len(chunks),
+            },
+        )
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

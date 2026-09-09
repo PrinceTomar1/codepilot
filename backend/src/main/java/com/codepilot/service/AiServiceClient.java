@@ -19,11 +19,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.Exceptions;
+import reactor.core.publisher.Flux;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
@@ -40,14 +43,17 @@ public class AiServiceClient {
 
     private final WebClient aiServiceWebClient;
     private final WebClient aiServiceReviewWebClient;
+    private final WebClient aiServiceStreamWebClient;
     private final ObjectMapper objectMapper;
 
     public AiServiceClient(
             @Qualifier("aiServiceWebClient") WebClient aiServiceWebClient,
             @Qualifier("aiServiceReviewWebClient") WebClient aiServiceReviewWebClient,
+            @Qualifier("aiServiceStreamWebClient") WebClient aiServiceStreamWebClient,
             ObjectMapper objectMapper) {
         this.aiServiceWebClient = aiServiceWebClient;
         this.aiServiceReviewWebClient = aiServiceReviewWebClient;
+        this.aiServiceStreamWebClient = aiServiceStreamWebClient;
         this.objectMapper = objectMapper;
     }
 
@@ -75,6 +81,23 @@ public class AiServiceClient {
         return post("/search", request, AiSearchResponse.class);
     }
 
+    /**
+     * The chatbot's streaming Q&A path: ai-service's {@code POST /query/stream} emits Server-Sent
+     * Events (event names {@code token} / {@code done} / {@code error}), which this relays as a
+     * cold {@link Flux} for QaService to pump into the client's SseEmitter. No retry -- a stream
+     * that fails partway can't be safely replayed. An upstream non-2xx (e.g. a pre-stream 503 for
+     * "LLM not configured") is mapped to the same ApiException/AiServiceException shape as the
+     * blocking calls, so callers handle both paths identically.
+     */
+    public Flux<ServerSentEvent<String>> queryStream(AiQueryRequest request) {
+        return aiServiceStreamWebClient.post()
+                .uri("/query/stream")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToFlux(new ParameterizedTypeReference<ServerSentEvent<String>>() {})
+                .onErrorMap(ex -> mapAiError("/query/stream", ex));
+    }
+
     private <T> T post(String path, Object body, Class<T> responseType) {
         return post(aiServiceWebClient, path, body, responseType);
     }
@@ -89,37 +112,48 @@ public class AiServiceClient {
                     .retryWhen(retrySpec())
                     .block();
         } catch (Exception raw) {
-            // When Retry.backoff() exhausts its attempts, Reactor rethrows a RetryExhaustedException
-            // whose own message is just "Retries exhausted: N/N" -- it wraps the *real* last-attempt
-            // exception as the cause. Unwrap it so callers see the actual failure (e.g. "LLM not
-            // configured") instead of a meaningless retry-bookkeeping message.
-            Exception e = Exceptions.isRetryExhausted(raw) && raw.getCause() instanceof Exception cause
-                    ? cause : raw;
-
-            if (e instanceof WebClientResponseException wcre) {
-                String responseBody = wcre.getResponseBodyAsString();
-                log.error("AI service call to {} failed with status {}: {}", path, wcre.getStatusCode(), responseBody);
-
-                String detail = extractErrorDetail(responseBody);
-                if (wcre.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE) {
-                    // ai-service's deliberate "not configured" signal (see LLMNotConfiguredError) --
-                    // surface it as-is (503, real message) rather than flattening it into a generic
-                    // 502, so the frontend can show the user something actionable.
-                    throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, detail != null ? detail : "AI features are not configured yet.", wcre);
-                }
-                if (wcre.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
-                    // ai-service's deliberate signal that the LLM provider itself is rate-limited /
-                    // over quota (see LLMRateLimitedError) -- surface as 429 with the real message
-                    // (e.g. "retry in 33s") instead of a generic 502 that gives the user no idea why.
-                    throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, detail != null ? detail : "AI provider rate limit reached. Please try again shortly.", wcre);
-                }
-                throw new AiServiceException(
-                        "AI service call to " + path + " failed" + (detail != null ? ": " + detail : ": " + wcre.getStatusCode()),
-                        wcre);
-            }
-            log.error("AI service call to {} failed", path, e);
-            throw new AiServiceException("AI service call to " + path + " failed: " + e.getMessage(), e);
+            throw mapAiError(path, raw);
         }
+    }
+
+    /**
+     * Normalizes any failure from a WebClient call (blocking or streaming) into this app's
+     * exception vocabulary: a deliberate 503/429 from ai-service becomes an {@link ApiException}
+     * carrying the real message, everything else an {@link AiServiceException}.
+     */
+    RuntimeException mapAiError(String path, Throwable raw) {
+        // When Retry.backoff() exhausts its attempts, Reactor rethrows a RetryExhaustedException
+        // whose own message is just "Retries exhausted: N/N" -- it wraps the *real* last-attempt
+        // exception as the cause. Unwrap it so callers see the actual failure (e.g. "LLM not
+        // configured") instead of a meaningless retry-bookkeeping message.
+        Throwable e = Exceptions.isRetryExhausted(raw) && raw.getCause() != null ? raw.getCause() : raw;
+
+        if (e instanceof WebClientResponseException wcre) {
+            String responseBody = wcre.getResponseBodyAsString();
+            log.error("AI service call to {} failed with status {}: {}", path, wcre.getStatusCode(), responseBody);
+
+            String detail = extractErrorDetail(responseBody);
+            if (wcre.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE) {
+                // ai-service's deliberate "not configured" signal (see LLMNotConfiguredError) --
+                // surface it as-is (503, real message) rather than flattening it into a generic
+                // 502, so the frontend can show the user something actionable.
+                return new ApiException(HttpStatus.SERVICE_UNAVAILABLE, detail != null ? detail : "AI features are not configured yet.", wcre);
+            }
+            if (wcre.getStatusCode() == HttpStatus.TOO_MANY_REQUESTS) {
+                // ai-service's deliberate signal that the LLM provider itself is rate-limited /
+                // over quota (see LLMRateLimitedError) -- surface as 429 with the real message
+                // (e.g. "retry in 33s") instead of a generic 502 that gives the user no idea why.
+                return new ApiException(HttpStatus.TOO_MANY_REQUESTS, detail != null ? detail : "AI provider rate limit reached. Please try again shortly.", wcre);
+            }
+            return new AiServiceException(
+                    "AI service call to " + path + " failed" + (detail != null ? ": " + detail : ": " + wcre.getStatusCode()),
+                    wcre);
+        }
+        if (e instanceof ApiException apiException) {
+            return apiException;
+        }
+        log.error("AI service call to {} failed", path, e);
+        return new AiServiceException("AI service call to " + path + " failed: " + e.getMessage(), e);
     }
 
     /** Pulls the "error" field out of ai-service's {"error": "..."} JSON error body, if present. */

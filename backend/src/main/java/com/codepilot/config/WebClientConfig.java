@@ -37,6 +37,26 @@ public class WebClientConfig {
         return buildAiServiceWebClient(baseUrl, REVIEW_TIMEOUT_MS);
     }
 
+    /**
+     * For the token-by-token chatbot stream (ai-service's SSE {@code POST /query/stream}). A
+     * streaming response stays open for the whole generation while dribbling out bytes, so the
+     * fixed response/read timeouts the other clients use would kill it mid-answer -- they're
+     * disabled here. The connect timeout still applies (a server that never accepts the
+     * connection should fail fast), and an overall ceiling is enforced one layer up by
+     * {@code SseEmitter}'s own timeout in QaService.
+     */
+    @Bean
+    public WebClient aiServiceStreamWebClient(@Value("${app.ai-service.base-url}") String baseUrl) {
+        HttpClient httpClient = HttpClient.create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, TIMEOUT_MS);
+
+        return WebClient.builder()
+                .baseUrl(baseUrl)
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+                .build();
+    }
+
     private WebClient buildAiServiceWebClient(String baseUrl, int timeoutMs) {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.min(timeoutMs, TIMEOUT_MS))

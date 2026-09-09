@@ -91,17 +91,22 @@ docker run -p 8080:8080 --env-file .env codepilot-backend
 - `repository` - Spring Data JPA repository interfaces.
 - `dto` - request/response records, split into `auth`, `repo`, `qa`, `review`, `onboarding`,
   `ai` (the exact request/response shapes for the Python AI service's `/index`, `/query`,
-  `/review`, `/onboarding` endpoints), `github` (GitHub REST API response shapes), and `error`.
+  `/query/stream`, `/review`, `/onboarding` endpoints), `github` (GitHub REST API response
+  shapes), and `error`.
 - `service` - business logic:
   - `AuthService` - register/login, password hashing, JWT issuing.
   - `RepositoryService` - repository CRUD + ownership checks + Redis caching of `GET /repositories/{id}`.
   - `IndexingService` - the `@Async` background job that fetches a repo's files from GitHub and
     ships them to the AI service's `/index` endpoint, updating `code_repositories`/`index_jobs`.
   - `GitHubClient` - real GitHub REST API calls (tree, blobs, PR files/diffs) via `WebClient`.
-  - `AiServiceClient` - typed client for the Python AI service's four endpoints.
+  - `AiServiceClient` - typed client for the Python AI service's endpoints, including the SSE
+    `queryStream` relay for the streaming chatbot.
   - `EncryptionService` - AES-256-GCM encryption for GitHub access tokens at rest.
   - `CacheService` - Redis get/put helpers for repository responses and Q&A answers (TTL'd).
-  - `QaService`, `ReviewService`, `OnboardingService` - the remaining repo-scoped features.
+  - `QaService` - blocking `ask` plus `askStream` (an `SseEmitter` relaying the AI service's
+    token-by-token stream to the browser); `QaTurnRecorder` persists the completed turn in its
+    own transaction off the request thread.
+  - `ReviewService`, `OnboardingService` - the remaining repo-scoped features.
   - `WebhookService` - verifies GitHub's HMAC signature and reacts to `pull_request` events by
     fetching the diff and requesting an AI review.
 - `controller` - REST controllers, one per resource area, matching the API surface below.

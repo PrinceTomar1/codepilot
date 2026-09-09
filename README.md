@@ -17,6 +17,8 @@ performance problems, and missing test coverage — automatically on every PR, o
 
 - **RAG-powered codebase assistant** — ask questions in plain English ("Where is authentication
   implemented?") and get answers grounded in the actual indexed code, not generic LLM knowledge.
+  Answers **stream token-by-token** over Server-Sent Events, so they render as they're generated
+  rather than after a multi-second wait.
 - **File-level references** — every chatbot answer cites the specific file and line range it drew
   from, so you can verify the answer against the real source instead of trusting it blindly.
 - **Vector search** — pgvector (HNSW-indexed) similarity search combined with exact
@@ -187,7 +189,7 @@ docs at `/swagger-ui/index.html` once the backend is running.
 |---|---|---|
 | Auth | `/api/auth` | register, login, email verification (link + 6-digit code), resend, passwordless login-by-code, password reset-by-code, GitHub OAuth, `/me` |
 | Repositories | `/api/repositories` | list/connect/get, list-my-GitHub-repos, connect-from-GitHub (any owner) |
-| Ask (Q&A) | `/api/repositories/{id}/ask`, `/qa-history` | chatbot questions + history |
+| Ask (Q&A) | `/api/repositories/{id}/ask`, `/ask/stream`, `/qa-history` | chatbot questions (blocking + token-by-token SSE stream) + history |
 | Search | `/api/repositories/{id}/search` | code search, no LLM call |
 | Reviews | `/api/repositories/{id}/reviews`, `/api/reviews/{id}`, `/api/repositories/{id}/pull-requests/{n}/review` | list/get PR reviews, manual trigger |
 | Onboarding | `/api/repositories/{id}/onboarding` | generated onboarding doc |
@@ -198,9 +200,9 @@ docs at `/swagger-ui/index.html` once the backend is running.
 
 ```
 Suite                  Command                          Result
-Backend                cd backend && mvn test           70/70 passing
-AI service             cd ai-service && pytest          145/145 passing
-Frontend               cd frontend && npx vitest run    68/68 passing
+Backend                cd backend && mvn test           87/87 passing
+AI service             cd ai-service && pytest          173/173 passing
+Frontend               cd frontend && npx vitest run    89/89 passing
 Frontend typecheck     cd frontend && npx tsc --noEmit  clean
 Frontend prod build    cd frontend && npm run build     clean
 Frontend lint          cd frontend && npx eslint src    0 errors
@@ -208,9 +210,10 @@ Frontend lint          cd frontend && npx eslint src    0 errors
 
 Covers registration + email verification, passwordless login-by-code, GitHub OAuth login, connecting a
 repo you don't own, incremental indexing, the chatbot with citations across multiple repos and
-question types, standalone code search, a full PR review across all four agents, onboarding doc
-generation, Redis-down graceful degradation, the fully-local Ollama LLM path, and a full
-`docker compose up --build` boot of all six services.
+question types (blocking and token-by-token SSE streaming, including the streamed refusal /
+general-knowledge / rate-limit fallbacks), standalone code search, a full PR review across all
+four agents, onboarding doc generation, Redis-down graceful degradation, the fully-local Ollama
+LLM path, and a full `docker compose up --build` boot of all six services.
 
 Production has been exercised the same way: registration with real email delivery, a full GitHub
 PR review producing a categorized report, and a repository indexed and queried through the

@@ -87,6 +87,31 @@ retrieved at all -- see `app/services/rag.py`).
 { "answer": "...", "citations": [ { "filePath": "...", "startLine": 1, "endLine": 20, "snippet": "..." } ], "chunksRetrieved": 8 }
 ```
 
+### `POST /query/stream`
+Identical retrieval to `/query`, but the answer streams back as
+Server-Sent Events (`Content-Type: text/event-stream`) so the caller can
+render it token-by-token:
+
+```
+event: token
+data: {"text": "Auth is handled by "}
+
+event: token
+data: {"text": "JwtAuthFilter..."}
+
+event: done
+data: {"answer": "...", "citations": [...], "chunksRetrieved": 8}
+```
+
+A `done` frame always closes the stream with the full, authoritative answer +
+citations. If the LLM is unconfigured or rate-limited mid-stream, an
+`event: error` frame (`{"error": "...", "status": 503|429}`) is emitted
+instead; the same conditions before the stream starts return a normal
+JSON error with the matching HTTP status. The special cases `/query`
+handles (chitchat, empty index, wrongful refusal, off-topic
+general-knowledge) are detected from the opening tokens and routed
+through the non-streaming path, so `done` stays correct.
+
 ### `POST /review`
 Runs four independent review agents (`SecurityAgent`, `BugDetectionAgent`,
 `TestCoverageAgent`, `CodeQualityAgent`) **concurrently** via

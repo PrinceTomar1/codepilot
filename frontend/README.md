@@ -78,7 +78,7 @@ src/
     client.ts       axios instance, auth token store, 401 interceptor
     auth.ts         login/register
     repositories.ts list/get/create + useRepositories/useRepository/useCreateRepository
-    qa.ts           ask + qa-history + useAskQuestion/useQAHistory
+    qa.ts           ask (blocking) + streamQuestion (SSE) + qa-history hooks
     reviews.ts      review list/detail + useReviews/useReviewDetail
     onboarding.ts   onboarding doc + useOnboarding
   components/     RepoCard, ConnectRepoModal, ChatPanel, CitationBadge,
@@ -104,6 +104,9 @@ are expected as JSON: `{"error": "message", "status": <code>}`.
 - `POST /repositories` `{githubOwner, githubRepo, accessToken}` → `Repository`
 - `GET /repositories/{id}` → `Repository` (poll while `PENDING`/`INDEXING`)
 - `POST /repositories/{id}/ask` `{question}` → `{answer, citations, chunksRetrieved}`
+- `POST /repositories/{id}/ask/stream` `{question}` → SSE (`token` / `done` / `error` frames); the
+  chatbot uses this via `streamQuestion()` in `src/api/qa.ts` (a `fetch()` reader, not `EventSource`,
+  so the `Authorization` header is sent). `/ask` stays as the fallback.
 - `GET /repositories/{id}/qa-history` → `QAHistoryEntry[]` (most recent first)
 - `GET /repositories/{id}/reviews` → `ReviewSummary[]`
 - `GET /reviews/{id}` → `ReviewDetail` (findings grouped by category)
