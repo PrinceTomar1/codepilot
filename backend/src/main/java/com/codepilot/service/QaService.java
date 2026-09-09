@@ -39,8 +39,14 @@ public class QaService {
     private static final int TOP_K = 8;
     private static final int MAX_HISTORY_TURNS = 6;
     private static final int MAX_HISTORY_ANSWER_CHARS = 500;
-    /** Overall ceiling for one streamed answer -- matches the AI service's own LLM call budget. */
-    private static final long STREAM_TIMEOUT_MS = 120_000L;
+    /**
+     * Overall ceiling for one streamed answer. Generous on purpose: a broad question ("walk me
+     * through the whole architecture") against a slow/loaded LLM can legitimately take minutes to
+     * finish generating, and a tighter limit here fires mid-answer -- the user sees the reply just
+     * stop partway through. The AI service keeps the connection warm with heartbeat frames, so a
+     * genuinely stuck upstream is caught by those going silent, not by this timer.
+     */
+    private static final long STREAM_TIMEOUT_MS = 600_000L;
 
     private final RepositoryService repositoryService;
     private final UserRepository userRepository;
@@ -167,10 +173,13 @@ public class QaService {
     void relayStream(SseEmitter emitter, UUID userId, UUID repositoryId, String question,
                      List<AiHistoryTurn> history, boolean cacheable) {
         AtomicReference<AskResponse> finalResponse = new AtomicReference<>();
-        try {
-            aiServiceClient.queryStream(new AiQueryRequest(repositoryId, question, TOP_K, history))
-                    .toStream()
-                    .forEach(event -> forwardEvent(emitter, event, finalResponse));
+        try (var events = aiServiceClient
+                .queryStream(new AiQueryRequest(repositoryId, question, TOP_K, history))
+                .toStream()) {
+            // try-with-resources: if we bail early (client gone, error), closing the stream
+            // cancels the reactive subscription and tears down the HTTP connection to ai-service
+            // instead of leaving it open until ai-service finishes generating on its own.
+            events.forEach(event -> forwardEvent(emitter, event, finalResponse));
         } catch (ApiException e) {
             // ai-service's deliberate 503 ("LLM not configured") / 429 (provider rate-limited) --
             // deliver it as an error frame the frontend can show, not a broken stream.
@@ -200,6 +209,19 @@ public class QaService {
 
     private void forwardEvent(SseEmitter emitter, org.springframework.http.codec.ServerSentEvent<String> event,
                               AtomicReference<AskResponse> finalResponse) {
+        // A heartbeat comes through as an event with no name and no data (just a comment). Relay
+        // it as a comment so the browser-facing connection is kept warm too, and stop here -- it
+        // carries nothing to render or parse.
+        if (event.event() == null && event.data() == null) {
+            try {
+                String comment = event.comment() == null ? "keep-alive" : event.comment();
+                emitter.send(SseEmitter.event().comment(comment));
+            } catch (IOException | IllegalStateException e) {
+                throw new StreamClosedException(e);
+            }
+            return;
+        }
+
         String name = event.event() == null ? "message" : event.event();
         String data = event.data() == null ? "" : event.data();
         try {

@@ -588,7 +588,12 @@ async def answer_question_stream(
         async for delta in llm.stream(
             system=QUERY_SYSTEM_PROMPT + UNTRUSTED_CONTENT_NOTICE,
             user=prompt,
-            max_tokens=2048,
+            # 4096, not the 2048 the blocking path uses: a broad question ("explain the whole
+            # architecture") that streams is exactly the case that legitimately needs a long
+            # answer, and at 2048 those reliably hit the cap and stop mid-thought. Streaming has
+            # no in-memory buffering cost to a longer answer the way a single blocking response
+            # does, so the extra headroom is close to free here.
+            max_tokens=4096,
             temperature=0.0,
             fast=True,
         ):

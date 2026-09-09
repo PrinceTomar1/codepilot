@@ -7,6 +7,7 @@ no LLM is configured.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -105,3 +106,33 @@ async def test_stream_returns_503_before_streaming_when_llm_unconfigured(client)
 
     assert resp.status_code == 503
     assert "not configured" in resp.json()["error"].lower()
+
+
+async def test_stream_sends_keep_alive_comments_while_the_model_is_slow(client, monkeypatch):
+    """A slow gap between tokens must not leave the SSE connection idle -- the endpoint fills it
+    with comment frames so an intermediary proxy doesn't cut the stream mid-answer."""
+    monkeypatch.setattr(query_router, "_HEARTBEAT_SECONDS", 0.05)
+
+    class _SlowLLM:
+        provider = "anthropic"
+        configured = True
+
+        async def stream(self, *args, **kwargs):
+            await asyncio.sleep(0.2)  # several heartbeat intervals with nothing to send
+            yield "done thinking"
+
+    app.dependency_overrides[get_llm_client] = lambda: _SlowLLM()
+    try:
+        async with client:
+            resp = await client.post(
+                "/query/stream",
+                json={"repositoryId": "11111111-1111-1111-1111-111111111111", "question": "explain everything"},
+            )
+    finally:
+        app.dependency_overrides.pop(get_llm_client, None)
+
+    assert resp.status_code == 200
+    assert ": keep-alive" in resp.text
+    frames = _parse_sse(resp.text)
+    assert frames[-1][0] == "done"
+    assert frames[-1][1]["answer"] == "done thinking"
