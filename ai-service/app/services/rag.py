@@ -525,6 +525,115 @@ async def answer_question(
     return answer.strip(), citations
 
 
+# How much of the streamed answer to hold back before emitting anything, so the special-case
+# markers (a strict "not enough information" refusal, or the general-knowledge marker) can be
+# recognized on the opening text and routed through the non-streaming answer_question() -- which
+# owns the refusal-retry / general-knowledge / deterministic-fallback logic -- instead of being
+# streamed verbatim. A real grounded answer flushes this buffer immediately and streams the rest.
+_STREAM_SNIFF_CHARS = 160
+
+
+async def answer_question_stream(
+    llm: LLMClient, question: str, chunks: list[RetrievedChunk], history: list[QaTurn] | None = None,
+    has_keyword_match: bool = True,
+):
+    """Streaming counterpart to answer_question(). Async-generates ("token", str) items as the
+    answer is produced, then exactly one ("final", (answer, citations)) with the canonical full
+    result. Callers should render the tokens for immediacy but treat the "final" payload as
+    authoritative -- for chitchat, an empty index, a wrongful refusal, or an off-topic question
+    it is produced by answer_question() and can differ from the concatenated tokens."""
+    if is_chitchat(question):
+        reply = chitchat_response(question)
+        yield "token", reply
+        yield "final", (reply, [])
+        return
+
+    citations = [
+        Citation(
+            filePath=c.file_path,
+            startLine=c.start_line,
+            endLine=c.end_line,
+            snippet=c.content[:400],
+        )
+        for c in chunks
+    ]
+
+    if not chunks:
+        yield "final", (NO_CONTEXT_ANSWER, [])
+        return
+
+    prompt = build_query_prompt(question, chunks, history)
+
+    def _is_special_opening(text: str) -> bool:
+        low = text.strip().lower()
+        return low.startswith(NO_CONTEXT_ANSWER.lower()) or low.startswith(
+            GENERAL_KNOWLEDGE_MARKER.lower()
+        )
+
+    async def _authoritative():
+        """Hand off to the non-streaming path (refusal-retry / general-knowledge /
+        deterministic fallback all live there), then emit its result in even slices so the
+        client still gets a typewriter effect."""
+        answer, final_citations = await answer_question(
+            llm, question, chunks, history, has_keyword_match=has_keyword_match
+        )
+        for i in range(0, len(answer), 40):
+            yield "token", answer[i : i + 40]
+        yield "final", (answer, final_citations)
+
+    buffer = ""
+    flushed = False
+    full_text = ""
+    try:
+        async for delta in llm.stream(
+            system=QUERY_SYSTEM_PROMPT + UNTRUSTED_CONTENT_NOTICE,
+            user=prompt,
+            max_tokens=2048,
+            temperature=0.0,
+            fast=True,
+        ):
+            if not delta:
+                continue
+            full_text += delta
+            if flushed:
+                yield "token", delta
+                continue
+            buffer += delta
+            if len(buffer) < _STREAM_SNIFF_CHARS:
+                continue
+            # Enough opening text to tell an ordinary grounded answer from the model taking one
+            # of answer_question()'s special paths.
+            if _is_special_opening(buffer):
+                async for item in _authoritative():
+                    yield item
+                return
+            yield "token", buffer
+            flushed = True
+    except LLMRateLimitedError:
+        # Same reasoning as answer_question()'s rate-limit handling -- but only safe to recover
+        # from if nothing has been streamed to the client yet.
+        if flushed:
+            raise
+        if has_keyword_match:
+            fallback = _fallback_answer_from_chunks(chunks)
+            yield "token", fallback
+            yield "final", (fallback, citations)
+        else:
+            yield "final", (NO_CONTEXT_ANSWER, [])
+        return
+
+    if not flushed:
+        # Stream ended before the sniff threshold (a short answer). Classify the whole thing.
+        if _is_special_opening(buffer):
+            async for item in _authoritative():
+                yield item
+            return
+        if buffer:
+            yield "token", buffer
+
+    yield "final", (full_text.strip(), citations)
+
+
 ONBOARDING_SYSTEM_PROMPT = """You are CodePilot, generating onboarding documentation for a new \
 engineer joining a repository. You are given a sample of representative code chunks from the \
 repository (not the full codebase). Using only what is shown, produce a JSON object with these \

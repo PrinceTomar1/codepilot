@@ -10,7 +10,9 @@ a raw traceback.
 """
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import AsyncIterator
 
 import anthropic
 import httpx
@@ -98,6 +100,119 @@ class LLMClient:
             f"LLM not configured: set {'GEMINI_API_KEY' if self.provider == 'gemini' else 'ANTHROPIC_API_KEY'}"
         )
 
+    async def stream(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 2048,
+        temperature: float = 0.2,
+        fast: bool = False,
+    ) -> AsyncIterator[str]:
+        """Same contract as complete(), but yields the answer incrementally as the provider
+        produces it -- this is what makes the chatbot feel real-time instead of showing a spinner
+        for the full generation time. Raises the same LLMNotConfiguredError / LLMRateLimitedError
+        as complete(); a rate-limit hit mid-stream surfaces once the underlying SDK raises it.
+        The final TRUNCATION_NOTE is yielded as a trailing chunk when the provider reports the
+        response was cut off at the token limit, exactly as complete() appends it."""
+        if self._gemini_client is not None:
+            gen = self._stream_gemini(system, user, max_tokens, temperature, fast)
+        elif self._anthropic_client is not None:
+            gen = self._stream_anthropic(system, user, max_tokens, temperature)
+        elif self._ollama_base_url is not None:
+            gen = self._stream_ollama(system, user, max_tokens, temperature)
+        else:
+            raise LLMNotConfiguredError(
+                f"LLM not configured: set {'GEMINI_API_KEY' if self.provider == 'gemini' else 'ANTHROPIC_API_KEY'}"
+            )
+        async for chunk in gen:
+            if chunk:
+                yield chunk
+
+    async def _stream_anthropic(
+        self, system: str, user: str, max_tokens: int, temperature: float
+    ) -> AsyncIterator[str]:
+        try:
+            async with self._anthropic_client.messages.stream(
+                model=self.settings.ANTHROPIC_MODEL,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+            ) as stream:
+                async for text in stream.text_stream:
+                    yield text
+                final = await stream.get_final_message()
+        except anthropic.RateLimitError as exc:
+            raise LLMRateLimitedError(f"Anthropic rate limit / quota exceeded: {exc}") from exc
+        if getattr(final, "stop_reason", None) == "max_tokens":
+            logger.warning("Anthropic streamed response truncated at max_tokens=%d", max_tokens)
+            yield TRUNCATION_NOTE
+
+    async def _stream_gemini(
+        self, system: str, user: str, max_tokens: int, temperature: float, fast: bool
+    ) -> AsyncIterator[str]:
+        config_kwargs = self._gemini_config_kwargs(system, max_tokens, temperature, fast)
+        finish_reason = ""
+        try:
+            stream = await self._gemini_client.aio.models.generate_content_stream(
+                model=self.settings.GEMINI_MODEL,
+                contents=user,
+                config=genai_types.GenerateContentConfig(**config_kwargs),
+            )
+            async for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+                candidates = chunk.candidates or []
+                if candidates and candidates[0].finish_reason is not None:
+                    finish_reason = str(candidates[0].finish_reason)
+        except genai_errors.ClientError as exc:
+            if exc.code == 429:
+                raise LLMRateLimitedError(f"Gemini rate limit / quota exceeded: {exc.message}") from exc
+            raise
+        if "MAX_TOKENS" in finish_reason:
+            logger.warning("Gemini streamed response truncated at max_output_tokens=%d", max_tokens)
+            yield TRUNCATION_NOTE
+
+    async def _stream_ollama(
+        self, system: str, user: str, max_tokens: int, temperature: float
+    ) -> AsyncIterator[str]:
+        try:
+            async with httpx.AsyncClient(timeout=180.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self._ollama_base_url}/api/chat",
+                    json={
+                        "model": self.settings.OLLAMA_MODEL,
+                        "messages": [
+                            {"role": "system", "content": system},
+                            {"role": "user", "content": user},
+                        ],
+                        "stream": True,
+                        "options": {
+                            "temperature": temperature,
+                            "num_predict": max_tokens,
+                        },
+                    },
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        data = json.loads(line)
+                        piece = data.get("message", {}).get("content", "") or ""
+                        if piece:
+                            yield piece
+                        if data.get("done_reason") == "length":
+                            logger.warning(
+                                "Ollama streamed response truncated at num_predict=%d", max_tokens
+                            )
+                            yield TRUNCATION_NOTE
+        except httpx.ConnectError as exc:
+            raise LLMNotConfiguredError(
+                f"Ollama not reachable at {self._ollama_base_url} -- is `ollama serve` running? "
+                f"({exc})"
+            ) from exc
+
     async def _complete_anthropic(self, system: str, user: str, max_tokens: int, temperature: float) -> str:
         try:
             response = await self._anthropic_client.messages.create(
@@ -120,9 +235,9 @@ class LLMClient:
             text += TRUNCATION_NOTE
         return text
 
-    async def _complete_gemini(
-        self, system: str, user: str, max_tokens: int, temperature: float, fast: bool = False
-    ) -> str:
+    def _gemini_config_kwargs(
+        self, system: str, max_tokens: int, temperature: float, fast: bool
+    ) -> dict:
         config_kwargs: dict = dict(
             system_instruction=system,
             max_output_tokens=max_tokens,
@@ -139,6 +254,12 @@ class LLMClient:
                 )
             else:
                 config_kwargs["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=0)
+        return config_kwargs
+
+    async def _complete_gemini(
+        self, system: str, user: str, max_tokens: int, temperature: float, fast: bool = False
+    ) -> str:
+        config_kwargs = self._gemini_config_kwargs(system, max_tokens, temperature, fast)
 
         try:
             response = await self._gemini_client.aio.models.generate_content(

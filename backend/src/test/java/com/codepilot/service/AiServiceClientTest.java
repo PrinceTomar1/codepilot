@@ -40,10 +40,10 @@ class AiServiceClientTest {
                 .baseUrl("http://localhost:" + server.getAddress().getPort())
                 .clientConnector(new ReactorClientHttpConnector())
                 .build();
-        // Same client for both params here: these tests exercise post()'s error-handling, not the
-        // review-specific longer timeout (that's a real HttpClient/connector-level setting, not
-        // something a local mock server test would observe).
-        return new AiServiceClient(webClient, webClient, new ObjectMapper());
+        // Same client for all three params here: these tests exercise post()/queryStream()'s
+        // error-handling, not the review-specific longer timeout or the stream client's disabled
+        // read timeout (real HttpClient/connector settings a local mock server test wouldn't observe).
+        return new AiServiceClient(webClient, webClient, webClient, new ObjectMapper());
     }
 
     @Test
@@ -127,5 +127,60 @@ class AiServiceClientTest {
 
         // A genuinely transient 502 SHOULD be retried: 1 initial + 2 retries = 3 calls.
         assertThat(callCount.get()).isEqualTo(3);
+    }
+
+    @Test
+    void queryStreamParsesServerSentEventsInOrder() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/query/stream", exchange -> {
+            String body = String.join("",
+                    "event: token\ndata: {\"text\": \"Hello \"}\n\n",
+                    "event: token\ndata: {\"text\": \"world\"}\n\n",
+                    "event: done\ndata: {\"answer\": \"Hello world\", \"citations\": [], \"chunksRetrieved\": 2}\n\n");
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+
+        AiServiceClient client = clientFor(server);
+
+        var events = client.queryStream(new AiQueryRequest(UUID.randomUUID(), "hi", 8, java.util.List.of()))
+                .collectList()
+                .block();
+
+        assertThat(events).hasSize(3);
+        assertThat(events.get(0).event()).isEqualTo("token");
+        assertThat(events.get(0).data()).contains("Hello ");
+        assertThat(events.get(2).event()).isEqualTo("done");
+        assertThat(events.get(2).data()).contains("\"answer\": \"Hello world\"");
+    }
+
+    @Test
+    void queryStreamMapsUpstream503ToApiException() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/query/stream", exchange -> {
+            byte[] bytes = "{\"error\":\"LLM not configured: set ANTHROPIC_API_KEY\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(503, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        server.start();
+
+        AiServiceClient client = clientFor(server);
+
+        assertThatThrownBy(() -> client.queryStream(
+                        new AiQueryRequest(UUID.randomUUID(), "hi", 8, java.util.List.of()))
+                        .collectList().block())
+                .isInstanceOf(ApiException.class)
+                .satisfies(ex -> {
+                    ApiException apiEx = (ApiException) ex;
+                    assertThat(apiEx.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertThat(apiEx.getMessage()).isEqualTo("LLM not configured: set ANTHROPIC_API_KEY");
+                });
     }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { useAskQuestion, useQAHistory } from '../api/qa'
-import { getErrorMessage, formatDate } from '../lib/utils'
+import { useQueryClient } from '@tanstack/react-query'
+import { streamQuestion, useQAHistory } from '../api/qa'
+import { formatDate } from '../lib/utils'
 import CitationBadge from './CitationBadge'
 import MarkdownContent from './MarkdownContent'
 import type { AskQuestionResponse } from '../types'
@@ -11,17 +12,26 @@ interface ChatMessage {
   answer: string
   citations: AskQuestionResponse['citations']
   createdAt: string
+  /** true until the first token arrives (shows the "thinking" indicator) */
   pending?: boolean
+  /** true while tokens are still streaming in (shows a caret, keeps input disabled) */
+  streaming?: boolean
 }
 
 export default function ChatPanel({ repoId }: { repoId: string }) {
   const { data: history, isLoading: historyLoading } = useQAHistory(repoId)
-  const askQuestion = useAskQuestion(repoId)
+  const queryClient = useQueryClient()
 
   const [draft, setDraft] = useState('')
   const [localMessages, setLocalMessages] = useState<ChatMessage[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [isStreaming, setIsStreaming] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => abortRef.current?.abort()
+  }, [])
 
   const historyMessages: ChatMessage[] = (history ?? [])
     .slice()
@@ -36,19 +46,23 @@ export default function ChatPanel({ repoId }: { repoId: string }) {
 
   const messages = [...historyMessages, ...localMessages]
 
+  // Scroll on a new message AND as the streaming answer grows, so the latest text stays in view.
+  const streamingAnswerLength = localMessages.reduce((n, m) => n + m.answer.length, 0)
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [messages.length])
+    scrollRef.current?.scrollTo?.({ top: scrollRef.current.scrollHeight })
+  }, [messages.length, streamingAnswerLength])
 
-  // A successful question invalidates the qa-history query (see useAskQuestion), which refetches
-  // in the background and will eventually include this exact Q&A. Once it does, drop the local
-  // optimistic copy so it isn't rendered twice -- but only once the server-backed version is
-  // actually available, so the answer never has a gap where it's shown then briefly disappears.
+  // A finished question invalidates the qa-history query, which refetches in the background and
+  // will eventually include this exact Q&A. Once it does, drop the local optimistic copy so it
+  // isn't rendered twice -- but only once the server-backed version is actually available (so the
+  // answer never blinks out) and never while it's still pending or streaming.
   useEffect(() => {
     if (!history || history.length === 0) return
     setLocalMessages((prev) => {
       const historyQuestions = new Set(history.map((h) => h.question))
-      const next = prev.filter((m) => m.pending || !historyQuestions.has(m.question))
+      const next = prev.filter(
+        (m) => m.pending || m.streaming || !historyQuestions.has(m.question),
+      )
       return next.length === prev.length ? prev : next
     })
   }, [history])
@@ -56,10 +70,11 @@ export default function ChatPanel({ repoId }: { repoId: string }) {
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     const question = draft.trim()
-    if (!question || askQuestion.isPending) return
+    if (!question || isStreaming) return
 
     setError(null)
     setDraft('')
+    setIsStreaming(true)
 
     const pendingId = `pending-${Date.now()}`
     setLocalMessages((prev) => [
@@ -71,28 +86,55 @@ export default function ChatPanel({ repoId }: { repoId: string }) {
         citations: [],
         createdAt: new Date().toISOString(),
         pending: true,
+        streaming: true,
       },
     ])
 
-    try {
-      const response = await askQuestion.mutateAsync(question)
-      setLocalMessages((prev) =>
-        prev.map((m) =>
-          m.id === pendingId
-            ? {
-                ...m,
-                answer: response.answer,
-                citations: response.citations,
-                pending: false,
-              }
-            : m,
-        ),
-      )
-    } catch (err) {
-      setError(getErrorMessage(err))
-      setLocalMessages((prev) => prev.filter((m) => m.id !== pendingId))
-      setDraft(question)
-    }
+    const patch = (updater: (m: ChatMessage) => ChatMessage) =>
+      setLocalMessages((prev) => prev.map((m) => (m.id === pendingId ? updater(m) : m)))
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    let receivedAnyToken = false
+
+    await streamQuestion(
+      repoId,
+      question,
+      {
+        onToken: (text) => {
+          receivedAnyToken = true
+          patch((m) => ({ ...m, pending: false, answer: m.answer + text }))
+        },
+        onDone: ({ answer, citations }) => {
+          patch((m) => ({
+            ...m,
+            pending: false,
+            streaming: false,
+            answer: answer || m.answer,
+            citations,
+            createdAt: new Date().toISOString(),
+          }))
+          queryClient.invalidateQueries({
+            queryKey: ['repositories', repoId, 'qa-history'],
+          })
+        },
+        onError: (message) => {
+          setError(message)
+          if (receivedAnyToken) {
+            // Keep the partial answer visible, just stop the streaming affordances.
+            patch((m) => ({ ...m, pending: false, streaming: false }))
+          } else {
+            setLocalMessages((prev) => prev.filter((m) => m.id !== pendingId))
+            setDraft(question)
+          }
+        },
+      },
+      controller.signal,
+    )
+
+    setIsStreaming(false)
   }
 
   return (
@@ -142,8 +184,16 @@ export default function ChatPanel({ repoId }: { repoId: string }) {
                   </div>
                 ) : (
                   <>
-                    <MarkdownContent content={message.answer} />
-                    {message.citations.length > 0 && (
+                    <div className="relative">
+                      <MarkdownContent content={message.answer} />
+                      {message.streaming && (
+                        <span
+                          aria-hidden
+                          className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-slate-400"
+                        />
+                      )}
+                    </div>
+                    {!message.streaming && message.citations.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-800 pt-3">
                         {message.citations.map((citation, idx) => (
                           <CitationBadge
@@ -153,9 +203,11 @@ export default function ChatPanel({ repoId }: { repoId: string }) {
                         ))}
                       </div>
                     )}
-                    <p className="mt-2 text-[11px] text-slate-600">
-                      {formatDate(message.createdAt)}
-                    </p>
+                    {!message.streaming && (
+                      <p className="mt-2 text-[11px] text-slate-600">
+                        {formatDate(message.createdAt)}
+                      </p>
+                    )}
                   </>
                 )}
               </div>
@@ -190,9 +242,9 @@ export default function ChatPanel({ repoId }: { repoId: string }) {
         <button
           type="submit"
           className="btn-primary shrink-0"
-          disabled={!draft.trim() || askQuestion.isPending}
+          disabled={!draft.trim() || isStreaming}
         >
-          Send
+          {isStreaming ? 'Answering…' : 'Send'}
         </button>
       </form>
     </div>

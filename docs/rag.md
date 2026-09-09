@@ -30,6 +30,33 @@ Backend: persist to qa_history, cache the response, return to frontend
 Frontend: renders the answer with clickable file:line citations
 ```
 
+## Streaming (real-time answers)
+
+The chatbot UI uses a streaming variant of the same pipeline so the answer renders
+token-by-token instead of appearing all at once after the full generation:
+
+```
+Frontend: fetch() POST /api/repositories/{id}/ask/stream   (Authorization header; SSE response)
+    │
+    ▼
+Backend (QaService.askStream): ownership/history checks on the request thread, then a worker
+    │  thread relays the AI service's SSE frames straight through to the browser's SseEmitter.
+    │  Redis cache hit? still "streams" — one token frame with the whole answer, then done.
+    ▼
+ai-service: POST /query/stream  — identical retrieval to /query, then LLMClient.stream() yields
+    │  deltas. Frames: `token {"text": "..."}`, then `done {"answer","citations","chunksRetrieved"}`,
+    │  or `error {"error","status"}` if the LLM is unconfigured / rate-limited.
+    ▼
+Backend: on the `done` frame, persist to qa_history + populate the cache, exactly as /ask does.
+```
+
+The `done` frame always carries the full, authoritative answer + citations. The special cases
+`answer_question()` handles (chitchat, empty index, a wrongful refusal, an off-topic
+general-knowledge question) are detected from the opening tokens and routed through the
+non-streaming path, so `done` stays correct even when it differs from the concatenated tokens.
+The non-streaming `POST /query` and `POST /api/repositories/{id}/ask` remain for the cache path,
+tests, and as a fallback.
+
 ## Chunking
 
 `app/services/chunking.py`. Rather than naive fixed-size character windows, files are split along
