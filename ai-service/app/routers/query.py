@@ -120,6 +120,14 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+# While the model is still "thinking" (before the first token) or pausing mid-answer, the SSE
+# connection would otherwise sit completely idle -- long enough for a proxy or load balancer
+# between here and the browser to decide it's dead and cut it, which shows up as an answer that
+# stops mid-sentence. A comment frame every few seconds keeps every hop on the path convinced the
+# stream is alive without affecting how the client parses it.
+_HEARTBEAT_SECONDS = 10.0
+
+
 @router.post("/query/stream")
 async def query_repository_stream(
     body: QueryRequest,
@@ -149,24 +157,53 @@ async def query_repository_stream(
     async def generate() -> AsyncIterator[str]:
         answer = ""
         citations: list[Citation] = []
+
+        # Run the RAG generator on its own task feeding a queue, so the heartbeat below can wait on
+        # the queue with a timeout WITHOUT cancelling an in-flight LLM request (which is what
+        # wrapping `answer_question_stream()` directly in asyncio.wait_for() would do).
+        queue: asyncio.Queue = asyncio.Queue()
+        _DONE = object()
+
+        async def _pump() -> None:
+            try:
+                async for item in answer_question_stream(
+                    llm, body.question, chunks, body.history, has_keyword_match=has_keyword_match,
+                ):
+                    await queue.put(("item", item))
+            except Exception as exc:  # noqa: BLE001 -- surfaced verbatim to the consumer below
+                await queue.put(("error", exc))
+            finally:
+                await queue.put(("done", _DONE))
+
+        pump_task = asyncio.create_task(_pump())
         try:
-            async for kind, payload in answer_question_stream(
-                llm, body.question, chunks, body.history, has_keyword_match=has_keyword_match,
-            ):
+            while True:
+                try:
+                    tag, value = await asyncio.wait_for(queue.get(), timeout=_HEARTBEAT_SECONDS)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+
+                if tag == "done":
+                    break
+                if tag == "error":
+                    exc = value
+                    if isinstance(exc, LLMNotConfiguredError):
+                        yield _sse("error", {"error": str(exc), "status": 503})
+                    elif isinstance(exc, LLMRateLimitedError):
+                        yield _sse("error", {"error": str(exc), "status": 429})
+                    else:
+                        logger.exception("Unhandled error during /query/stream", exc_info=exc)
+                        yield _sse("error", {"error": "Internal server error", "status": 500})
+                    return
+
+                kind, payload = value
                 if kind == "token":
                     yield _sse("token", {"text": payload})
                 else:  # "final"
                     answer, citations = payload
-        except LLMNotConfiguredError as exc:
-            yield _sse("error", {"error": str(exc), "status": 503})
-            return
-        except LLMRateLimitedError as exc:
-            yield _sse("error", {"error": str(exc), "status": 429})
-            return
-        except Exception:
-            logger.exception("Unhandled error during /query/stream")
-            yield _sse("error", {"error": "Internal server error", "status": 500})
-            return
+        finally:
+            pump_task.cancel()
 
         yield _sse(
             "done",
