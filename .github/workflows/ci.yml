@@ -29,6 +29,24 @@ jobs:
   ai-service:
     name: AI service (pytest)
     runs-on: ubuntu-latest
+    # Most of the suite is pure unit tests, but test_incremental_indexing.py is a real
+    # integration test against Postgres+pgvector (the file-hash-diffing SQL isn't meaningful to
+    # fake with a mock) -- same image docker-compose.yml uses locally, same default credentials
+    # ai-service's own DATABASE_URL default already assumes.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: codepilot
+          POSTGRES_USER: codepilot
+          POSTGRES_PASSWORD: codepilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U codepilot -d codepilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,8 +57,22 @@ jobs:
       - name: Install dependencies
         working-directory: ai-service
         run: pip install -r requirements.txt
+      - name: Apply database migrations
+        # ai-service only ever reads/writes code_chunks -- the business tables the integration
+        # test also touches (users, code_repositories) are owned by the backend's Flyway
+        # migrations, so apply those same SQL files directly rather than standing up the whole
+        # JVM backend just to run its migration step.
+        env:
+          PGPASSWORD: codepilot
+        run: |
+          for f in $(ls backend/src/main/resources/db/migration/V*.sql | sort -V); do
+            echo "Applying $f"
+            psql -h localhost -U codepilot -d codepilot -v ON_ERROR_STOP=1 -f "$f"
+          done
       - name: pytest
         working-directory: ai-service
+        env:
+          DATABASE_URL: postgresql://codepilot:codepilot@localhost:5432/codepilot
         run: pytest -q
 
   frontend:
