@@ -172,6 +172,7 @@ and in `.env.example`, never real values.
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Used when `AI_PROVIDER=anthropic` | — |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | Used when `AI_PROVIDER=gemini`; free tier, no credit card, at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | — |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | Used when `AI_PROVIDER=ollama` — run `brew install ollama && ollama serve && ollama pull qwen2.5:7b-instruct` first | `http://localhost:11434` / `qwen2.5:7b-instruct` |
+| `AI_FALLBACK_PROVIDER` | Second provider (`anthropic`/`gemini`/`ollama`) to automatically retry against when `AI_PROVIDER` hits a rate limit, instead of surfacing a 429 — e.g. `ollama`, since it has no quota to run out of | unset (no fallback) |
 | `EMBEDDING_PROVIDER` | `local` (hashing, zero cost/deps) or `openai` (real semantic embeddings) | `local` |
 | `OPENAI_API_KEY` | Required only if `EMBEDDING_PROVIDER=openai` | — |
 | `JWT_SECRET` / `APP_ENCRYPTION_KEY` | **Change before deploying anywhere real.** Sign JWTs / encrypt stored GitHub tokens | dev-only insecure defaults |
@@ -207,7 +208,7 @@ All three suites run automatically on every push/PR to `master` via
 ```
 Suite                  Command                          Result
 Backend                cd backend && mvn test           90/90 passing
-AI service             cd ai-service && pytest          174/174 passing
+AI service             cd ai-service && pytest          180/180 passing
 Frontend               cd frontend && npx vitest run    89/89 passing
 Frontend typecheck     cd frontend && npx tsc --noEmit  clean
 Frontend prod build    cd frontend && npm run build     clean
@@ -238,8 +239,10 @@ outbound SMTP entirely on their free tier, so production email delivery uses `MA
 
 ## Known limitations
 
-- No free-tier LLM API has generous quota for sustained real usage (Gemini's free tier is 20
-  requests/day) — use `AI_PROVIDER=ollama` for unlimited local usage, or a paid tier for production.
+- No individual free-tier LLM API has generous quota for sustained real usage (Gemini's free tier
+  is 20 requests/day) — set `AI_FALLBACK_PROVIDER=ollama` so the chatbot automatically continues
+  on unlimited local inference the moment the primary provider rate-limits, instead of the user
+  seeing a 429; or use `AI_PROVIDER=ollama` outright, or a paid tier for production.
 - GitHub webhook registration on GitHub's side isn't automated by the app — the manual "trigger
   review" button is the workaround until that's built.
 - A repository renamed on GitHub after being connected (e.g. `owner/old-name` → `owner/new-name`)

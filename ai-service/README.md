@@ -199,7 +199,7 @@ app/routers/{index,query,review,onboarding,health}.py
 app/services/chunking.py         language-aware-ish chunking
 app/services/embeddings.py       EmbeddingProvider interface + local/OpenAI impls
 app/services/vector_store.py     SQLAlchemy async + pgvector access to code_chunks
-app/services/llm.py              Anthropic Claude client wrapper
+app/services/llm.py              Pluggable Anthropic/Gemini/Ollama client + rate-limit fallback
 app/services/rag.py              query prompt construction + onboarding prompt
 app/agents/base_agent.py         shared agent JSON-output parsing
 app/agents/{security,bug,test,quality}_agent.py

@@ -73,6 +73,20 @@ class LLMClient:
             if settings.ANTHROPIC_API_KEY:
                 self._anthropic_client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
+        # Optional automatic fallback (see Settings.AI_FALLBACK_PROVIDER): a second, fully
+        # independent LLMClient for a different provider, used only when the primary one raises
+        # LLMRateLimitedError. Built by copying `settings` with just AI_PROVIDER swapped, so it
+        # picks up that provider's own key/model the same way the primary client did -- and its
+        # own AI_FALLBACK_PROVIDER is cleared so a fallback can never chain into a fallback of its
+        # own. None (the default) when unset or pointed at the same provider as the primary --
+        # either way, .complete()/.stream() behave exactly as they did before this existed.
+        self._fallback: LLMClient | None = None
+        fallback_provider = (settings.AI_FALLBACK_PROVIDER or "").strip().lower()
+        if fallback_provider and fallback_provider != self.provider:
+            self._fallback = LLMClient(settings.model_copy(
+                update={"AI_PROVIDER": fallback_provider, "AI_FALLBACK_PROVIDER": None}
+            ))
+
     @property
     def configured(self) -> bool:
         return self._anthropic_client is not None or self._gemini_client is not None or self._ollama_base_url is not None
@@ -89,16 +103,28 @@ class LLMClient:
         synthesis task (answer this from the given context) that doesn't need multi-step
         exploration, and directly responsible for most of the chatbot's response latency (a
         trivial prompt was observed spending ~95 reasoning tokens before writing anything). Has no
-        effect on Anthropic or Ollama, neither of which enables extended "thinking" here."""
-        if self._gemini_client is not None:
-            return await self._complete_gemini(system, user, max_tokens, temperature, fast)
-        if self._anthropic_client is not None:
-            return await self._complete_anthropic(system, user, max_tokens, temperature)
-        if self._ollama_base_url is not None:
-            return await self._complete_ollama(system, user, max_tokens, temperature)
-        raise LLMNotConfiguredError(
-            f"LLM not configured: set {'GEMINI_API_KEY' if self.provider == 'gemini' else 'ANTHROPIC_API_KEY'}"
-        )
+        effect on Anthropic or Ollama, neither of which enables extended "thinking" here.
+
+        Falls back to Settings.AI_FALLBACK_PROVIDER (if configured) when the primary provider
+        raises LLMRateLimitedError -- see the fallback client construction in __init__."""
+        try:
+            if self._gemini_client is not None:
+                return await self._complete_gemini(system, user, max_tokens, temperature, fast)
+            if self._anthropic_client is not None:
+                return await self._complete_anthropic(system, user, max_tokens, temperature)
+            if self._ollama_base_url is not None:
+                return await self._complete_ollama(system, user, max_tokens, temperature)
+            raise LLMNotConfiguredError(
+                f"LLM not configured: set {'GEMINI_API_KEY' if self.provider == 'gemini' else 'ANTHROPIC_API_KEY'}"
+            )
+        except LLMRateLimitedError:
+            if self._fallback is None:
+                raise
+            logger.warning(
+                "Primary LLM provider (%s) rate-limited; falling back to %s",
+                self.provider, self._fallback.provider,
+            )
+            return await self._fallback.complete(system, user, max_tokens, temperature, fast)
 
     async def stream(
         self,
@@ -113,7 +139,14 @@ class LLMClient:
         for the full generation time. Raises the same LLMNotConfiguredError / LLMRateLimitedError
         as complete(); a rate-limit hit mid-stream surfaces once the underlying SDK raises it.
         The final TRUNCATION_NOTE is yielded as a trailing chunk when the provider reports the
-        response was cut off at the token limit, exactly as complete() appends it."""
+        response was cut off at the token limit, exactly as complete() appends it.
+
+        Falls back to Settings.AI_FALLBACK_PROVIDER (if configured) the same way complete() does
+        -- but ONLY when the primary provider rate-limits before yielding anything at all. Once
+        even one real chunk has reached the caller, a rate limit is re-raised instead: restarting
+        a fresh generation from a different provider partway through an answer would either
+        duplicate or contradict what's already been streamed to the user, so the caller's own
+        rate-limit handling (see rag.answer_question_stream) is what has to take over from there."""
         if self._gemini_client is not None:
             gen = self._stream_gemini(system, user, max_tokens, temperature, fast)
         elif self._anthropic_client is not None:
@@ -124,9 +157,22 @@ class LLMClient:
             raise LLMNotConfiguredError(
                 f"LLM not configured: set {'GEMINI_API_KEY' if self.provider == 'gemini' else 'ANTHROPIC_API_KEY'}"
             )
-        async for chunk in gen:
-            if chunk:
-                yield chunk
+        yielded_anything = False
+        try:
+            async for chunk in gen:
+                if chunk:
+                    yielded_anything = True
+                    yield chunk
+        except LLMRateLimitedError:
+            if yielded_anything or self._fallback is None:
+                raise
+            logger.warning(
+                "Primary LLM provider (%s) rate-limited before streaming anything; "
+                "falling back to %s", self.provider, self._fallback.provider,
+            )
+            async for chunk in self._fallback.stream(system, user, max_tokens, temperature, fast):
+                if chunk:
+                    yield chunk
 
     async def _stream_anthropic(
         self, system: str, user: str, max_tokens: int, temperature: float
