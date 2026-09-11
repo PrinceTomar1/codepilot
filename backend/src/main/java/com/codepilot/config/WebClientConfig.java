@@ -128,4 +128,18 @@ public class WebClientConfig {
                 .defaultHeader("X-GitHub-Api-Version", "2022-11-28")
                 .build();
     }
+
+    /** Generic, no-base-URL client for KeepWarmPinger -- hits whatever full URLs are configured
+     * in app.keep-warm.urls, so it can't have a fixed base like the other clients here. Short
+     * timeout: a ping that's slow to respond has already done its job of touching the route. */
+    @Bean
+    public WebClient keepWarmWebClient() {
+        HttpClient httpClient = HttpClient.create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
+                .responseTimeout(java.time.Duration.ofSeconds(10));
+
+        return WebClient.builder()
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .build();
+    }
 }

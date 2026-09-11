@@ -109,6 +109,9 @@ docker run -p 8080:8080 --env-file .env codepilot-backend
   - `ReviewService`, `OnboardingService` - the remaining repo-scoped features.
   - `WebhookService` - verifies GitHub's HMAC signature and reacts to `pull_request` events by
     fetching the diff and requesting an AI review.
+  - `KeepWarmPinger` - `@Scheduled` background task, GETs the URLs in `KEEP_WARM_URLS` every 5min
+    so a PaaS host's public-domain edge routing doesn't go cold between real visitors. No-op when
+    unset.
 - `controller` - REST controllers, one per resource area, matching the API surface below.
 - `exception` - `ApiException` (+ `AiServiceException`) and a `@RestControllerAdvice` that turns
   all of them (plus validation errors) into a consistent `{"error": ..., "status": ...}` body.

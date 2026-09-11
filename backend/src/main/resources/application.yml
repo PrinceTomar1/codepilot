@@ -102,6 +102,11 @@ app:
       client-secret: ${GITHUB_CLIENT_SECRET:}
       redirect-uri: ${GITHUB_OAUTH_REDIRECT_URI:http://localhost:8080/api/auth/github/callback}
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  # Comma-separated URLs to GET periodically (see KeepWarmPinger) so a PaaS host's edge routing
+  # to a rarely-visited public domain doesn't go cold between real visitors. Empty by default --
+  # a no-op unless explicitly configured for a deployment that's actually seeing this.
+  keep-warm:
+    urls: ${KEEP_WARM_URLS:}
   mail:
     from: ${MAIL_FROM:no-reply@codepilot.local}
     # "smtp" (default) talks to whatever MAIL_HOST/PORT above point at -- Mailpit locally. "sendgrid"
