@@ -1,0 +1,70 @@
+name: CI
+
+# Runs the exact suites documented in README.md's Testing table, so "all green" here means the
+# same thing it means when run locally. Each service's job is independent -- a failure in one
+# doesn't block seeing the others' results.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  backend:
+    name: Backend (mvn test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # Must match backend/pom.xml's <java.version> -- Mockito's inline mock maker doesn't
+          # yet support newer JDKs, so this can't just track "latest".
+          java-version: "21"
+          cache: maven
+      - name: mvn test
+        working-directory: backend
+        run: mvn -B test
+
+  ai-service:
+    name: AI service (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai-service/requirements.txt
+      - name: Install dependencies
+        working-directory: ai-service
+        run: pip install -r requirements.txt
+      - name: pytest
+        working-directory: ai-service
+        run: pytest -q
+
+  frontend:
+    name: Frontend (vitest, tsc, build, lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci
+        working-directory: frontend
+        run: npm ci
+      - name: vitest run
+        working-directory: frontend
+        run: npx vitest run
+      - name: tsc --noEmit
+        working-directory: frontend
+        run: npx tsc --noEmit
+      - name: eslint
+        working-directory: frontend
+        run: npx eslint src
+      - name: production build
+        working-directory: frontend
+        run: npm run build
