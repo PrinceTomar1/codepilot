@@ -1,5 +1,7 @@
 # CodePilot - AI Codebase intelligence
 
+[![CI](https://github.com/PrinceTomar1/codepilot/actions/workflows/ci.yml/badge.svg)](https://github.com/PrinceTomar1/codepilot/actions/workflows/ci.yml)
+
 A RAG-powered GitHub codebase assistant: connect a repository, ask questions about it in plain
 English and get answers grounded in the actual code with file-level citations, and get an
 agentic AI pipeline that reviews pull requests for bugs, security issues, code smells,
@@ -198,6 +200,9 @@ docs at `/swagger-ui/index.html` once the backend is running.
 | Webhooks | `/api/webhooks/github` | GitHub push/PR events (signature-verified, not JWT) |
 
 ## Testing
+
+All three suites run automatically on every push/PR to `master` via
+[GitHub Actions](.github/workflows/ci.yml) — the badge above reflects the latest run. Locally:
 
 ```
 Suite                  Command                          Result
