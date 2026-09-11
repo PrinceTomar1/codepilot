@@ -178,6 +178,7 @@ and in `.env.example`, never real values.
 | `MAIL_HOST` / `MAIL_PORT` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_SMTP_AUTH` / `MAIL_SMTP_STARTTLS` / `MAIL_FROM` | `MAIL_PROVIDER=smtp` only. Leave unset in Docker to use the bundled Mailpit catcher | `mailpit:1025` (Docker) |
 | `SENDGRID_API_KEY` / `SENDGRID_FROM_ADDRESS` | `MAIL_PROVIDER=sendgrid` only. `SENDGRID_FROM_ADDRESS` must be a Single Sender verified in SendGrid's dashboard (no domain purchase needed) | — |
 | `CORS_ALLOWED_ORIGIN` / `FRONTEND_URL` | **Must be set to your real domain before deploying** — default only works for local dev | `http://localhost:5173` |
+| `KEEP_WARM_URLS` | Comma-separated URLs the backend pings every 5 min so a PaaS host's edge routing doesn't go cold between visitors (see [Known limitations](#known-limitations)) | unset (disabled) |
 
 ## API overview
 
@@ -200,8 +201,8 @@ docs at `/swagger-ui/index.html` once the backend is running.
 
 ```
 Suite                  Command                          Result
-Backend                cd backend && mvn test           87/87 passing
-AI service             cd ai-service && pytest          173/173 passing
+Backend                cd backend && mvn test           90/90 passing
+AI service             cd ai-service && pytest          174/174 passing
 Frontend               cd frontend && npx vitest run    89/89 passing
 Frontend typecheck     cd frontend && npx tsc --noEmit  clean
 Frontend prod build    cd frontend && npm run build     clean
@@ -240,6 +241,10 @@ outbound SMTP entirely on their free tier, so production email delivery uses `MA
   will 404 on PR review/reindex until reconnected — the app doesn't follow GitHub's redirect yet.
 - SendGrid's free tier caps at 100 emails/day — fine for real use, would need a paid tier only at
   meaningfully higher signup volume.
+- On Railway's Hobby tier, a public domain that hasn't seen traffic in a while takes 4-6s to
+  answer the first request (edge routing warming up, not an app restart — the process stays up
+  the whole time), then responds normally after. Set `KEEP_WARM_URLS` on the backend to your
+  frontend and backend public URLs to keep the route warm; see `KeepWarmPinger`.
 
 ## Repo layout
 
