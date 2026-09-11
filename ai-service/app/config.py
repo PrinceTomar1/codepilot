@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # provider's settings matter -- LLMClient.configured reflects whichever one AI_PROVIDER points
     # at.
     AI_PROVIDER: str = "anthropic"
+    # Optional second provider ("anthropic" | "gemini" | "ollama") LLMClient automatically retries
+    # against when AI_PROVIDER hits a rate limit -- e.g. AI_FALLBACK_PROVIDER=ollama means a
+    # Gemini free-tier quota running out (20 requests/day) degrades to unlimited local inference
+    # instead of the user seeing a 429. Unset (the default) means no fallback: behavior is
+    # unchanged from before this existed.
+    AI_FALLBACK_PROVIDER: str | None = None
     ANTHROPIC_API_KEY: str | None = None
     ANTHROPIC_MODEL: str = "claude-sonnet-4-5-20250929"
     GEMINI_API_KEY: str | None = None
